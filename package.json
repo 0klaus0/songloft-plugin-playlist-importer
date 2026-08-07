@@ -5,9 +5,9 @@
   "author": "songloft-community",
   "license": "Apache-2.0",
   "scripts": {
-    "dev": "songloft-plugin-builder dev",
-    "build": "songloft-plugin-builder build",
-    "validate": "songloft-plugin-builder validate"
+    "dev": "songloft-plugin dev",
+    "build": "songloft-plugin build",
+    "validate": "songloft-plugin validate"
   },
   "devDependencies": {
     "@songloft/plugin-sdk": "latest",

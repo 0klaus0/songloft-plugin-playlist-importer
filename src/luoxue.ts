@@ -10,7 +10,8 @@
  * 通過搜尋目標平台找到對應歌曲 ID，再獲取下載連結。
  */
 import { PluginConfig, TrackInfo, LXSource, PLATFORM_TO_LX, SearchResult } from './types';
-import { fetchWithTimeout, searchMusic as searchOnPlatform } from './fetchers';
+import { fetchWithTimeout } from './utils';
+import { searchMusic as searchOnPlatform } from './fetchers';
 
 /** 洛雪音源獲取結果 */
 export interface LuoxueResult {

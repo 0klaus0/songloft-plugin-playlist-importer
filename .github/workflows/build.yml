@@ -1,0 +1,66 @@
+name: Build Plugin
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build plugin
+        run: npx songloft-plugin build
+
+      - name: Validate plugin
+        run: npx songloft-plugin validate
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: playlist-importer.jsplugin
+          path: dist/*.jsplugin.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload main.js artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: main.js
+          path: dist/main.js
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: playlist-importer.jsplugin
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*.jsplugin.zip
