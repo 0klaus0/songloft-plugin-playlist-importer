@@ -1,172 +1,176 @@
-# Songloft 歌單匯入器插件
+# Songloft 歌单导入器插件
 
-識別市面音樂軟件分享歌單，匯入至 Songloft 歌單中，或通過配置洛雪音源進行下載。
+识别市面音乐软件分享歌单，导入至 Songloft 歌单中，或通过配置洛雪音源进行下载。
 
 ## 功能特色
 
-- **多平台歌單識別**：自動識別網易雲音樂、QQ音樂、酷我音樂、酷狗音樂的分享連結
-- **短連結解析**：支援 163cn.tv、url.cn 等短連結自動重定向解析
-- **歌單預覽**：匯入前可預覽歌單名稱、封面、曲目列表
-- **兩種匯入模式**：
-  - **下載模式**：通過洛雪音源下載音樂檔案到本地音樂目錄
-  - **串流模式**：以遠端歌曲形式匯入，不佔用本地儲存
-- **跨平台匹配**：當歌單平台與洛雪音源平台不一致時，自動搜尋匹配
-- **進度追蹤**：即時顯示匯入進度、當前處理曲目、錯誤列表
-- **曲庫去重**：匯入前自動檢查曲庫中是否已有相同歌曲
+- **多平台歌单识别**：自动识别网易云音乐、QQ音乐、酷我音乐、酷狗音乐、汽水音乐的分享链接
+- **短链接解析**：支持 163cn.tv、url.cn、qishui.douyin.com 等短链接自动重定向解析
+- **歌单预览**：导入前可预览歌单名称、封面、曲目列表
+- **两种导入模式**：
+  - **下载模式**：通过洛雪音源下载音乐文件到本地音乐目录
+  - **串流模式**：以远程歌曲形式导入，不占用本地存储
+- **跨平台匹配**：当歌单平台与洛雪音源平台不一致时，自动搜索匹配
+- **进度追踪**：实时显示导入进度、当前处理曲目、错误列表
+- **曲库去重**：导入前自动检查曲库中是否已有相同歌曲
 
-## 前置條件
+## 前置条件
 
-1. **Songloft** v2.0+ 已安裝並運行
-2. **Node.js** 18+（用於建置插件）
-3. **洛雪音源 API 伺服器**（以下任一）：
-   - [lx-source](https://github.com/ZxwyWebSite/lx-source)（Go 實現，推薦）
-   - [lx-music-api-server](https://github.com/MeoProject/lx-music-api-server)（Python 實現）
+1. **Songloft** v2.0+ 已安装并运行
+2. **Node.js** 18+（用于构建插件）
+3. **洛雪音源 API 服务器**（以下任一）：
+   - [lx-source](https://github.com/ZxwyWebSite/lx-source)（Go 实现，推荐）
+   - [lx-music-api-server](https://github.com/MeoProject/lx-music-api-server)（Python 实现）
 
-## 建置與安裝
+## 构建与安装
 
-### 1. 安裝依賴
+### 1. 安装依赖
 
 ```bash
 cd songloft-playlist-importer
 npm install
 ```
 
-### 2. 建置插件
+### 2. 构建插件
 
 ```bash
 npm run build
 ```
 
-建置完成後，`dist/` 目錄下會生成 `playlist-importer.jsplugin.zip`。
+构建完成后，`dist/` 目录下会生成 `playlist-importer.jsplugin.zip`。
 
-### 3. 安裝到 Songloft
+### 3. 安装到 Songloft
 
-**方式一：設定頁面上傳**
-- 開啟 Songloft Web 介面 → 設定 → 插件管理
-- 上傳 `dist/playlist-importer.jsplugin.zip`
+**方式一：设置页面上传**
+- 打开 Songloft Web 界面 → 设置 → 插件管理
+- 上传 `dist/playlist-importer.jsplugin.zip`
 
-**方式二：開發模式熱重載**
+**方式二：开发模式热重载**
 ```bash
 npm run dev
 ```
-自動構建、上傳並監聽檔案變更，適合開發除錯。
+自动构建、上传并监听文件变更，适合开发调试。
 
-**方式三：手動放置**
-- 將 zip 解壓到 Songloft 的 `data/jsplugins/playlist-importer/` 目錄
-- 重啟 Songloft
+**方式三：手动放置**
+- 将 zip 解压到 Songloft 的 `data/jsplugins/playlist-importer/` 目录
+- 重启 Songloft
 
 ## 使用指南
 
-### 步驟 1：配置洛雪音源
+### 步骤 1：配置洛雪音源
 
-1. 在 Songloft 中開啟「歌單匯入器」插件頁面
-2. 切換到「設定」標籤
-3. 填入洛雪音源 API 伺服器位址（如 `http://192.168.1.100:8080`）
-4. 如伺服器有密鑰驗證，填入 API 密鑰
-5. 點擊「測試連接」確認伺服器可達
-6. 點擊「儲存設定」
+1. 在 Songloft 中打开「歌单导入器」插件页面
+2. 切换到「设置」标签
+3. 填入洛雪音源 API 服务器地址（如 `http://192.168.1.100:8080`）
+4. 如服务器有密钥验证，填入 API 密钥
+5. 点击「测试连接」确认服务器可达
+6. 点击「保存设置」
 
-### 步驟 2：配置匯入選項
+### 步骤 2：配置导入选项
 
-- **匯入模式**：
-  - 下載模式：將音樂檔案下載到 Songloft 音樂目錄（需重新掃描音樂庫）
-  - 串流模式：以遠端 URL 形式匯入，直接串流播放
-- **預設音質**：128k / 320k / flac / flac24bit
-- **預設搜尋來源**：跨平台匹配時使用的搜尋平台
+- **导入模式**：
+  - 下载模式：将音乐文件下载到 Songloft 音乐目录（需重新扫描音乐库）
+  - 串流模式：以远程 URL 形式导入，直接串流播放
+- **默认音质**：128k / 320k / flac / flac24bit
+- **默认搜索来源**：跨平台匹配时使用的搜索平台
 
-### 步驟 3：匯入歌單
+### 步骤 3：导入歌单
 
-1. 切換到「匯入歌單」標籤
-2. 將音樂 App 的分享連結或文字貼入輸入框
-3. 點擊「預覽歌單」查看歌單資訊
-4. 確認無誤後點擊「開始匯入」
-5. 等待匯入完成，查看進度和結果
+1. 切换到「导入歌单」标签
+2. 将音乐 App 的分享链接或文字贴入输入框
+3. 点击「预览歌单」查看歌单信息
+4. 确认无误后点击「开始导入」
+5. 等待导入完成，查看进度和结果
 
-## 支援的分享連結格式
+## 支持的分享链接格式
 
-| 平台 | 範例 |
+| 平台 | 示例 |
 |------|------|
-| 網易雲音樂 | `https://music.163.com/playlist?id=123456` |
-| 網易雲音樂（短） | `https://y.music.163.com/m/playlist?id=123456` |
-| QQ音樂 | `https://y.qq.com/n/ryqq/playlist/abc123` |
-| 酷我音樂 | `http://www.kuwo.cn/playlist_detail/123456` |
-| 酷狗音樂 | `https://www.kugou.com/yy/special/single/123456.html` |
+| 网易云音乐 | `https://music.163.com/playlist?id=123456` |
+| 网易云音乐（短） | `https://y.music.163.com/m/playlist?id=123456` |
+| QQ音乐 | `https://y.qq.com/n/ryqq/playlist/abc123` |
+| 酷我音乐 | `http://www.kuwo.cn/playlist_detail/123456` |
+| 酷狗音乐 | `https://www.kugou.com/yy/special/single/123456.html` |
+| 汽水音乐 | `https://qishui.douyin.com/s/xxxxx` |
 
-也支援包含 URL 的分享文字，如：
+也支持包含 URL 的分享文字，如：
 ```
-我分享了一個歌單 https://y.music.163.com/m/playlist?id=123456 一起聽吧
+我分享了一个歌单 https://y.music.163.com/m/playlist?id=123456 一起听吧
 ```
 
-## 專案結構
+> **汽水音乐说明**：汽水音乐无直接对应的洛雪音源，导入时会自动在其他平台（酷我/QQ/网易云等）搜索匹配同名歌曲进行下载。
+
+## 项目结构
 
 ```
 songloft-playlist-importer/
-├── package.json              # 專案配置與建置腳本
+├── package.json              # 项目配置与构建脚本
 ├── tsconfig.json             # TypeScript 配置
-├── plugin.json               # Songloft 插件清單
+├── plugin.json               # Songloft 插件清单
 ├── src/
-│   ├── main.ts               # 主入口 — 生命週期 + HTTP 路由
-│   ├── types.ts              # 型別定義與常數
+│   ├── main.ts               # 主入口 — 生命周期 + HTTP 路由
+│   ├── types.ts              # 类型定义与常量
 │   ├── config.ts             # 配置管理（songloft.storage）
-│   ├── utils.ts              # 工具函數
-│   ├── parsers.ts            # 分享連結解析器（4 平台）
-│   ├── fetchers.ts           # 歌單抓取器 + 跨平台搜尋
-│   ├── luoxue.ts             # 洛雪音源客戶端
-│   └── songloft-api.ts       # Songloft REST API 客戶端
+│   ├── utils.ts              # 工具函数
+│   ├── parsers.ts            # 分享链接解析器（5 平台）
+│   ├── fetchers.ts           # 歌单抓取器 + 跨平台搜索
+│   ├── luoxue.ts             # 洛雪音源客户端
+│   └── songloft-api.ts       # Songloft REST API 客户端
 ├── static/
-│   ├── index.html            # 前端 UI 頁面
-│   ├── style.css             # 樣式表
-│   └── app.js                # 前端邏輯
-└── dist/                     # 建置輸出（自動生成）
+│   ├── index.html            # 前端 UI 页面
+│   ├── style.css             # 样式表
+│   ├── app.js                # 前端逻辑
+│   └── icon.jpg              # 插件图标
+└── dist/                     # 构建输出（自动生成）
     └── playlist-importer.jsplugin.zip
 ```
 
-## 架構說明
+## 架构说明
 
 ```
-使用者貼上分享連結
+用户贴上分享链接
         │
         ▼
   ┌─────────────┐
-  │  解析器      │  識別平台 + 提取歌單 ID
-  │ parsers.ts  │  支援短連結重定向
+  │  解析器      │  识别平台 + 提取歌单 ID
+  │ parsers.ts  │  支持短链接重定向
   └──────┬──────┘
          │
          ▼
   ┌─────────────┐
-  │  抓取器      │  從平台 API 獲取歌單曲目列表
-  │ fetchers.ts │  網易雲 / QQ / 酷我 / 酷狗
+  │  抓取器      │  从平台 API 获取歌单曲目列表
+  │ fetchers.ts │  网易云 / QQ / 酷我 / 酷狗 / 汽水
   └──────┬──────┘
          │
          ▼
   ┌─────────────┐
-  │  洛雪音源    │  獲取下載/串流 URL
-  │ luoxue.ts   │  自動跨平台搜尋匹配
+  │  洛雪音源    │  获取下载/串流 URL
+  │ luoxue.ts   │  自动跨平台搜索匹配
   └──────┬──────┘
          │
          ▼
   ┌──────────────┐
-  │ Songloft API │  建立歌單 → 匹配/下載/新增歌曲 → 加入歌單
+  │ Songloft API │  创建歌单 → 匹配/下载/新增歌曲 → 加入歌单
   │songloft-api  │
   └──────────────┘
 ```
 
-## 插件 API 端點
+## 插件 API 端点
 
-| 方法 | 路徑 | 說明 |
+| 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/config` | 取得當前配置 |
-| POST | `/api/config` | 儲存配置 |
-| GET | `/api/platforms` | 取得支援平台列表 |
-| POST | `/api/parse` | 解析分享連結 |
-| POST | `/api/preview` | 解析 + 抓取歌單（預覽） |
-| POST | `/api/import` | 啟動歌單匯入任務 |
-| GET | `/api/status` | 取得匯入進度 |
-| POST | `/api/test-luoxue` | 測試洛雪音源伺服器連通性 |
+| GET | `/api/config` | 取得当前配置 |
+| POST | `/api/config` | 保存配置 |
+| GET | `/api/platforms` | 取得支持平台列表 |
+| POST | `/api/parse` | 解析分享链接 |
+| POST | `/api/preview` | 解析 + 抓取歌单（预览） |
+| POST | `/api/import` | 启动歌单导入任务 |
+| GET | `/api/status` | 取得导入进度 |
+| POST | `/api/test-luoxue` | 测试洛雪音源服务器连通性 |
 
-## 洛雪音源伺服器部署
+## 洛雪音源服务器部署
 
-### lx-source（Go，推薦）
+### lx-source（Go，推荐）
 
 ```bash
 # Docker 部署
@@ -177,7 +181,7 @@ docker run -d \
   ghcr.io/zxwy/lx-source:latest
 ```
 
-部署後在插件設定中填入 `http://伺服器IP:8080`。
+部署后在插件设置中填入 `http://服务器IP:8080`。
 
 ### lx-music-api-server（Python）
 
@@ -188,23 +192,26 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## 常見問題
+## 常见问题
 
-**Q: 匯入時提示「無法識別此分享連結」？**
-A: 確認連結來自支援的四個平台之一。如果是短連結，可能需要等待重定向解析。
+**Q: 导入时提示「无法识别此分享链接」？**
+A: 确认链接来自支持的五个平台之一。如果是短链接，可能需要等待重定向解析。
 
-**Q: 下載模式匯入後聽不到歌？**
-A: 下載模式需要手動在 Songloft 設定中重新掃描音樂庫，掃描完成後歌曲才會出現。
+**Q: 下载模式导入后听不到歌？**
+A: 下载模式需要手动在 Songloft 设置中重新扫描音乐库，扫描完成后歌曲才会出现。
 
-**Q: 串流模式提示「無法新增遠端歌曲」？**
-A: 串流模式依賴 Songloft 的遠端歌曲 API，請確認 Songloft 版本支援此功能。
+**Q: 串流模式提示「无法新增远程歌曲」？**
+A: 串流模式依赖 Songloft 的远程歌曲 API，请确认 Songloft 版本支持此功能。
 
-**Q: 跨平台匹配不準確？**
-A: 跨平台搜尋基於歌名+藝術家模糊匹配，可能出現誤匹配。建議將預設搜尋來源設為與歌單相同的平台。
+**Q: 跨平台匹配不准确？**
+A: 跨平台搜索基于歌名+艺术家模糊匹配，可能出现误匹配。建议将默认搜索来源设为与歌单相同的平台。
 
-**Q: 洛雪音源 API 回應異常？**
-A: 各音樂平台 API 可能隨時變更導致失效。請確保洛雪音源伺服器使用最新版本。
+**Q: 汽水音乐导入失败？**
+A: 汽水音乐通过解析分享页面提取曲目信息，依赖页面结构。若汽水音乐更新页面结构，可能需要更新插件。此外，汽水音乐的歌曲需在其他平台搜索匹配后才能下载，匹配率可能不如原生平台。
 
-## 授權
+**Q: 洛雪音源 API 回应异常？**
+A: 各音乐平台 API 可能随时变更导致失效。请确保洛雪音源服务器使用最新版本。
+
+## 授权
 
 Apache-2.0
