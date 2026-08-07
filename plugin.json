@@ -1,5 +1,5 @@
 {
-  "name": "歌單匯入器",
+  "name": "歌单导入器",
   "version": "1.0.0",
   "entryPath": "playlist-importer",
   "main": "main.js",

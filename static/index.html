@@ -1,51 +1,55 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>歌單匯入器</title>
+  <title>歌单导入器</title>
+  <link rel="icon" href="icon.jpg">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app">
     <header class="header">
-      <h1>歌單匯入器</h1>
-      <p class="subtitle">識別音樂平台分享歌單，匯入至 Songloft 或通過洛雪音源下載</p>
+      <div class="logo-row">
+        <img src="icon.jpg" class="logo" alt="logo">
+        <h1>歌单<span class="accent">导入器</span></h1>
+      </div>
+      <p class="subtitle">识别音乐平台分享歌单，导入至 Songloft 或通过洛雪音源下载</p>
     </header>
 
     <nav class="tabs">
-      <button class="tab-btn active" data-tab="import">匯入歌單</button>
-      <button class="tab-btn" data-tab="settings">設定</button>
+      <button class="tab-btn active" data-tab="import">导入歌单</button>
+      <button class="tab-btn" data-tab="settings">设置</button>
     </nav>
 
-    <!-- 匯入歌單面板 -->
+    <!-- 导入歌单面板 -->
     <section id="tab-import" class="tab-content active">
       <div class="card">
-        <label class="label">貼上分享連結或文字</label>
+        <label class="label">粘贴分享链接或文字</label>
         <textarea id="share-input" class="textarea" rows="4"
-          placeholder="貼上來自網易雲、QQ音樂、酷我、酷狗的分享連結或文字...&#10;例如：https://y.music.163.com/m/playlist?id=123456"></textarea>
+          placeholder="粘贴来自网易云音乐、QQ音乐、酷我、酷狗、汽水音乐的分享链接或文字...&#10;例如：https://y.music.163.com/m/playlist?id=123456"></textarea>
 
         <div class="button-row">
-          <button id="btn-preview" class="btn btn-secondary">預覽歌單</button>
-          <button id="btn-import" class="btn btn-primary">開始匯入</button>
+          <button id="btn-preview" class="btn btn-secondary">预览歌单</button>
+          <button id="btn-import" class="btn btn-primary">开始导入</button>
         </div>
       </div>
 
-      <!-- 預覽結果 -->
+      <!-- 预览结果 -->
       <div id="preview-section" class="card hidden">
-        <h2 class="card-title">歌單預覽</h2>
+        <h2 class="card-title">歌单预览</h2>
         <div id="preview-info" class="preview-info"></div>
         <div id="preview-tracks" class="track-list"></div>
       </div>
 
-      <!-- 匯入進度 -->
+      <!-- 导入进度 -->
       <div id="progress-section" class="card hidden">
-        <h2 class="card-title">匯入進度</h2>
+        <h2 class="card-title">导入进度</h2>
         <div class="progress-bar-container">
           <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
         </div>
         <div class="progress-stats">
-          <span id="progress-text">準備中...</span>
+          <span id="progress-text">准备中...</span>
           <span id="progress-count"></span>
         </div>
         <div id="progress-current" class="progress-current"></div>
@@ -53,68 +57,68 @@
       </div>
     </section>
 
-    <!-- 設定面板 -->
+    <!-- 设置面板 -->
     <section id="tab-settings" class="tab-content">
       <div class="card">
-        <h2 class="card-title">洛雪音源設定</h2>
+        <h2 class="card-title">洛雪音源设置</h2>
 
         <div class="form-group">
-          <label class="label" for="cfg-url">音源 API 伺服器位址</label>
+          <label class="label" for="cfg-url">音源 API 服务器地址</label>
           <input type="text" id="cfg-url" class="input"
             placeholder="http://192.168.1.100:8080">
-          <p class="hint">部署 lx-source 或 lx-music-api-server 的伺服器位址</p>
+          <p class="hint">部署 lx-source 或 lx-music-api-server 的服务器地址</p>
         </div>
 
         <div class="form-group">
-          <label class="label" for="cfg-pass">API 密鑰（可選）</label>
+          <label class="label" for="cfg-pass">API 密钥（可选）</label>
           <input type="password" id="cfg-pass" class="input" placeholder="留空表示不需要">
         </div>
 
         <div class="button-row">
-          <button id="btn-test" class="btn btn-secondary">測試連接</button>
-          <button id="btn-save-config" class="btn btn-primary">儲存設定</button>
+          <button id="btn-test" class="btn btn-secondary">测试连接</button>
+          <button id="btn-save-config" class="btn btn-primary">保存设置</button>
         </div>
         <div id="test-result" class="test-result hidden"></div>
       </div>
 
       <div class="card">
-        <h2 class="card-title">匯入選項</h2>
+        <h2 class="card-title">导入选项</h2>
 
         <div class="form-group">
-          <label class="label" for="cfg-mode">匯入模式</label>
+          <label class="label" for="cfg-mode">导入模式</label>
           <select id="cfg-mode" class="select">
-            <option value="download">下載模式 — 下載音樂檔案到本地</option>
-            <option value="stream">串流模式 — 以遠端歌曲形式匯入</option>
+            <option value="download">下载模式 — 下载音乐文件到本地</option>
+            <option value="stream">串流模式 — 以远程歌曲形式导入</option>
           </select>
         </div>
 
         <div class="form-group">
-          <label class="label" for="cfg-quality">預設音質</label>
+          <label class="label" for="cfg-quality">默认音质</label>
           <select id="cfg-quality" class="select">
-            <option value="128k">128kbps (標準)</option>
-            <option value="320k">320kbps (高品質)</option>
-            <option value="flac">FLAC (無損)</option>
-            <option value="flac24bit">FLAC 24bit (Hi-Res)</option>
+            <option value="128k">128kbps（标准）</option>
+            <option value="320k">320kbps（高质量）</option>
+            <option value="flac">FLAC（无损）</option>
+            <option value="flac24bit">FLAC 24bit（Hi-Res）</option>
           </select>
         </div>
 
         <div class="form-group">
-          <label class="label" for="cfg-source">預設搜尋來源（跨平台匹配時使用）</label>
+          <label class="label" for="cfg-source">默认搜索来源（跨平台匹配时使用）</label>
           <select id="cfg-source" class="select">
-            <option value="kw">酷我音樂</option>
-            <option value="kg">酷狗音樂</option>
-            <option value="tx">QQ音樂</option>
-            <option value="wy">網易雲音樂</option>
-            <option value="mg">咪咕音樂</option>
+            <option value="kw">酷我音乐</option>
+            <option value="kg">酷狗音乐</option>
+            <option value="tx">QQ音乐</option>
+            <option value="wy">网易云音乐</option>
+            <option value="mg">咪咕音乐</option>
           </select>
-          <p class="hint">當歌單平台與洛雪音源平台不一致時，在此平台搜尋匹配歌曲</p>
+          <p class="hint">当歌单平台与洛雪音源平台不一致时，在此平台搜索匹配歌曲</p>
         </div>
 
-        <button id="btn-save-options" class="btn btn-primary">儲存選項</button>
+        <button id="btn-save-options" class="btn btn-primary">保存选项</button>
       </div>
 
       <div class="card">
-        <h2 class="card-title">支援的平台</h2>
+        <h2 class="card-title">支持的平台</h2>
         <div id="platform-list" class="platform-list"></div>
       </div>
     </section>

@@ -1,13 +1,13 @@
 /**
- * 分享連結解析器 — 識別各平台歌單分享連結
+ * 分享链接解析器 — 识别各平台歌单分享链接
  *
- * 支援平台：網易雲音樂、QQ音樂、酷我音樂、酷狗音樂
- * 支援格式：完整 URL、短連結、App 分享文字
+ * 支持平台：网易云音乐、QQ音乐、酷我音乐、酷狗音乐、汽水音乐
+ * 支持格式：完整 URL、短链接、App 分享文字
  */
 import { ParsedShareLink, Platform, PLATFORM_NAMES } from './types';
 import { extractUrls, fetchWithTimeout } from './utils';
 
-/** 各平台 URL 匹配規則 */
+/** 各平台 URL 匹配规则 */
 interface MatchRule {
   platform: Platform;
   patterns: RegExp[];
@@ -15,33 +15,31 @@ interface MatchRule {
 }
 
 const MATCH_RULES: MatchRule[] = [
-  // === 網易雲音樂 ===
+  // === 网易云音乐 ===
   {
     platform: 'netease',
     patterns: [
       /music\.163\.com\/playlist/i,
       /music\.163\.com\/#\/playlist/i,
       /y\.music\.163\.com\/.*playlist/i,
-      /163cn\.tv\//i, // 短連結
+      /163cn\.tv\//i, // 短链接
     ],
     extractId(url: string): string | null {
-      // 從查詢參數中提取 id
       let match = url.match(/[?&]id=(\d+)/);
       if (match) return match[1];
-      // 從路徑中提取
       match = url.match(/\/playlist\/?(\d+)/);
       if (match) return match[1];
       return null;
     },
   },
-  // === QQ音樂 ===
+  // === QQ音乐 ===
   {
     platform: 'qqmusic',
     patterns: [
       /y\.qq\.com\/.*playlist/i,
       /y\.qq\.com\/.*playsquare/i,
       /c\.y\.qq\.com\/.*playlist/i,
-      /url\.cn\//i, // QQ短連結
+      /url\.cn\//i, // QQ短链接
     ],
     extractId(url: string): string | null {
       let match = url.match(/\/playlist\/([A-Za-z0-9]+)/);
@@ -53,14 +51,14 @@ const MATCH_RULES: MatchRule[] = [
       return null;
     },
   },
-  // === 酷我音樂 ===
+  // === 酷我音乐 ===
   {
     platform: 'kuwo',
     patterns: [
       /kuwo\.cn\/.*playlist/i,
       /kuwo\.cn\/playlists/i,
       /kuwo\.cn\/playlist_detail/i,
-      /t\.cn\//i, // 可能的短連結
+      /t\.cn\//i, // 可能的短链接
     ],
     extractId(url: string): string | null {
       let match = url.match(/\/playlist_detail\/?(\d+)/);
@@ -74,7 +72,7 @@ const MATCH_RULES: MatchRule[] = [
       return null;
     },
   },
-  // === 酷狗音樂 ===
+  // === 酷狗音乐 ===
   {
     platform: 'kugou',
     patterns: [
@@ -94,20 +92,38 @@ const MATCH_RULES: MatchRule[] = [
       return null;
     },
   },
+  // === 汽水音乐 ===
+  {
+    platform: 'qishui',
+    patterns: [
+      /qishui\.douyin\.com\/s\/[a-zA-Z0-9]+/i,
+      /ssmusic\.com\/share\/playlist/i,
+      /ssmusic\.com\/share\/song/i,
+    ],
+    extractId(url: string): string | null {
+      // qishui.douyin.com/s/XXXXX 格式
+      let match = url.match(/\/s\/([a-zA-Z0-9]+)/);
+      if (match) return match[1];
+      // ssmusic.com/share/playlist/XXXXX 格式
+      match = url.match(/\/share\/(?:playlist|song)\/([a-zA-Z0-9]+)/);
+      if (match) return match[1];
+      return null;
+    },
+  },
 ];
 
-/** 已知的短連結域名，需要跟隨重定向 */
-const SHORT_LINK_DOMAINS = ['163cn.tv', 'url.cn', 't.cn', 'tb.cn', 'dwz.cn'];
+/** 已知的短链接域名，需要跟随重定向 */
+const SHORT_LINK_DOMAINS = ['163cn.tv', 'url.cn', 't.cn', 'tb.cn', 'dwz.cn', 'qishui.douyin.com'];
 
 /**
- * 檢查 URL 是否為短連結
+ * 检查 URL 是否为短链接
  */
 function isShortLink(url: string): boolean {
   return SHORT_LINK_DOMAINS.some((domain) => url.includes(domain));
 }
 
 /**
- * 跟隨短連結重定向，取得最終 URL
+ * 跟随短链接重定向，取得最终 URL
  */
 async function resolveShortLink(url: string): Promise<string> {
   try {
@@ -117,10 +133,8 @@ async function resolveShortLink(url: string): Promise<string> {
       headers: { 'X-Fetch-No-Redirect': 'true' },
     }, 8000);
 
-    // 嘗試從 Location header 取得重定向位址
     const location = resp.headers['location'] || resp.headers['Location'];
     if (location) {
-      // 如果是相對路徑，補全
       if (location.startsWith('/')) {
         const urlObj = new URL(url);
         return `${urlObj.protocol}//${urlObj.host}${location}`;
@@ -128,7 +142,6 @@ async function resolveShortLink(url: string): Promise<string> {
       return location;
     }
 
-    // 如果回應是 HTML，嘗試從中提取 URL
     if (resp.body && resp.body.includes('http')) {
       const urls = extractUrls(resp.body);
       if (urls.length > 0) return urls[0];
@@ -141,7 +154,7 @@ async function resolveShortLink(url: string): Promise<string> {
 }
 
 /**
- * 嘗試用規則匹配 URL，回傳平台和歌單 ID
+ * 尝试用规则匹配 URL，返回平台和歌单 ID
  */
 function matchUrl(url: string): { platform: Platform; playlistId: string } | null {
   for (const rule of MATCH_RULES) {
@@ -157,20 +170,20 @@ function matchUrl(url: string): { platform: Platform; playlistId: string } | nul
 }
 
 /**
- * 解析分享文字，識別歌單連結
+ * 解析分享文字，识别歌单链接
  *
- * @param text 使用者貼上的分享文字（可能包含 URL、描述文字等）
- * @returns 解析結果，若無法識別則回傳 null
+ * @param text 用户粘贴的分享文字（可能包含 URL、描述文字等）
+ * @returns 解析结果，若无法识别则返回 null
  */
 export async function parseShareLink(text: string): Promise<ParsedShareLink | null> {
   const trimmed = text.trim();
   if (!trimmed) return null;
 
-  // 步驟 1：從文字中提取所有 URL
+  // 步骤 1：从文字中提取所有 URL
   const urls = extractUrls(trimmed);
   if (urls.length === 0) return null;
 
-  // 步驟 2：逐一嘗試匹配
+  // 步骤 2：逐一尝试匹配
   for (const url of urls) {
     // 直接匹配
     let result = matchUrl(url);
@@ -183,12 +196,12 @@ export async function parseShareLink(text: string): Promise<ParsedShareLink | nu
       };
     }
 
-    // 步驟 3：如果是短連結，跟隨重定向後再匹配
+    // 步骤 3：如果是短链接，跟随重定向后再匹配
     if (isShortLink(url)) {
-      songloft.log.info(`解析短連結: ${url}`);
+      songloft.log.info(`解析短链接: ${url}`);
       const resolvedUrl = await resolveShortLink(url);
       if (resolvedUrl !== url) {
-        songloft.log.info(`短連結重定向至: ${resolvedUrl}`);
+        songloft.log.info(`短链接重定向至: ${resolvedUrl}`);
         result = matchUrl(resolvedUrl);
         if (result) {
           return {
@@ -206,7 +219,7 @@ export async function parseShareLink(text: string): Promise<ParsedShareLink | nu
 }
 
 /**
- * 取得所有支援的平台列表
+ * 取得所有支持的平台列表
  */
 export function getSupportedPlatforms(): { key: Platform; name: string }[] {
   return (Object.keys(PLATFORM_NAMES) as Platform[]).map((key) => ({

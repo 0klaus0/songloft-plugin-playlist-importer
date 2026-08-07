@@ -1,45 +1,47 @@
 /**
- * 歌單匯入器插件 — 型別定義
+ * 歌单导入器插件 — 类型定义
  */
 
-/** 支援的音樂平台 */
-export type Platform = 'netease' | 'qqmusic' | 'kuwo' | 'kugou';
+/** 支持的音乐平台 */
+export type Platform = 'netease' | 'qqmusic' | 'kuwo' | 'kugou' | 'qishui';
 
-/** 洛雪音源支援的來源 key */
+/** 洛雪音源支持的来源 key */
 export type LXSource = 'kw' | 'kg' | 'tx' | 'wy' | 'mg';
 
-/** 音質選項 */
+/** 音质选项 */
 export type Quality = '128k' | '320k' | 'flac' | 'flac24bit';
 
-/** 匯入模式 */
+/** 导入模式 */
 export type ImportMode = 'download' | 'stream';
 
-/** 平台到洛雪來源的映射 */
-export const PLATFORM_TO_LX: Record<Platform, LXSource> = {
+/** 平台到洛雪来源的映射（汽水音乐无直接对应，使用跨平台匹配） */
+export const PLATFORM_TO_LX: Partial<Record<Platform, LXSource>> = {
   netease: 'wy',
   qqmusic: 'tx',
   kuwo: 'kw',
   kugou: 'kg',
+  // qishui 无直接对应的洛雪来源，始终使用跨平台搜索匹配
 };
 
-/** 洛雪來源到中文名稱的映射 */
+/** 洛雪来源到中文名称的映射 */
 export const LX_SOURCE_NAMES: Record<LXSource, string> = {
-  kw: '酷我音樂',
-  kg: '酷狗音樂',
-  tx: 'QQ音樂',
-  wy: '網易雲音樂',
-  mg: '咪咕音樂',
+  kw: '酷我音乐',
+  kg: '酷狗音乐',
+  tx: 'QQ音乐',
+  wy: '网易云音乐',
+  mg: '咪咕音乐',
 };
 
-/** 平台中文名稱 */
+/** 平台中文名称 */
 export const PLATFORM_NAMES: Record<Platform, string> = {
-  netease: '網易雲音樂',
-  qqmusic: 'QQ音樂',
-  kuwo: '酷我音樂',
-  kugou: '酷狗音樂',
+  netease: '网易云音乐',
+  qqmusic: 'QQ音乐',
+  kuwo: '酷我音乐',
+  kugou: '酷狗音乐',
+  qishui: '汽水音乐',
 };
 
-/** 解析後的分享連結 */
+/** 解析后的分享链接 */
 export interface ParsedShareLink {
   platform: Platform;
   playlistId: string;
@@ -47,7 +49,7 @@ export interface ParsedShareLink {
   rawText?: string;
 }
 
-/** 單首曲目資訊 */
+/** 单首曲目信息 */
 export interface TrackInfo {
   title: string;
   artist: string;
@@ -57,7 +59,7 @@ export interface TrackInfo {
   platform: Platform;
 }
 
-/** 歌單資訊 */
+/** 歌单信息 */
 export interface PlaylistInfo {
   id: string;
   platform: Platform;
@@ -70,19 +72,19 @@ export interface PlaylistInfo {
 
 /** 插件配置 */
 export interface PluginConfig {
-  /** 洛雪音源 API 伺服器位址（如 http://192.168.1.100:8080） */
+  /** 洛雪音源 API 服务器地址（如 http://192.168.1.100:8080） */
   luoxueApiUrl: string;
-  /** 洛雪音源 API 密鑰（可選） */
+  /** 洛雪音源 API 密钥（可选） */
   luoxueApiPass: string;
-  /** 預設音質 */
+  /** 默认音质 */
   defaultQuality: Quality;
-  /** 匯入模式：download=下載到本地, stream=串流匯入 */
+  /** 导入模式：download=下载到本地, stream=串流导入 */
   importMode: ImportMode;
-  /** 預設搜尋來源（跨平台搜尋時使用） */
+  /** 默认搜索来源（跨平台搜索时使用） */
   defaultSearchSource: LXSource;
 }
 
-/** 預設配置 */
+/** 默认配置 */
 export const DEFAULT_CONFIG: PluginConfig = {
   luoxueApiUrl: '',
   luoxueApiPass: '',
@@ -91,7 +93,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   defaultSearchSource: 'kw',
 };
 
-/** 匯入進度回呼 */
+/** 导入进度回调 */
 export interface ImportProgress {
   total: number;
   current: number;
@@ -102,7 +104,7 @@ export interface ImportProgress {
   importedSongs: number;
 }
 
-/** HTTP 請求物件（Songloft 插件環境） */
+/** HTTP 请求对象（Songloft 插件环境） */
 export interface HttpRequest {
   method: string;
   path: string;
@@ -111,14 +113,14 @@ export interface HttpRequest {
   query: Record<string, string>;
 }
 
-/** HTTP 回應物件 */
+/** HTTP 回应对象 */
 export interface HttpResponse {
   statusCode: number;
   headers: Record<string, string>;
   body: string;
 }
 
-/** 搜尋結果 */
+/** 搜索结果 */
 export interface SearchResult {
   songId: string;
   title: string;

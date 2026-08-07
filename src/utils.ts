@@ -1,10 +1,10 @@
 /**
- * 工具函數
+ * 工具函数
  */
 import { HttpResponse } from './types';
 
 /**
- * 建立 JSON 回應
+ * 创建 JSON 回应
  */
 export function jsonResponse(data: unknown, statusCode = 200): HttpResponse {
   return {
@@ -15,14 +15,14 @@ export function jsonResponse(data: unknown, statusCode = 200): HttpResponse {
 }
 
 /**
- * 建立錯誤回應
+ * 创建错误回应
  */
 export function errorResponse(message: string, statusCode = 400): HttpResponse {
   return jsonResponse({ success: false, error: message }, statusCode);
 }
 
 /**
- * 解析請求 body 為 JSON
+ * 解析请求 body 为 JSON
  */
 export function parseBody<T = Record<string, unknown>>(body: string): T {
   if (!body || body.trim() === '') return {} as T;
@@ -30,7 +30,7 @@ export function parseBody<T = Record<string, unknown>>(body: string): T {
 }
 
 /**
- * 從 URL 中提取查詢參數
+ * 从 URL 中提取查询参数
  */
 export function parseQueryString(query: string): Record<string, string> {
   const result: Record<string, string> = {};
@@ -44,7 +44,7 @@ export function parseQueryString(query: string): Record<string, string> {
 }
 
 /**
- * 從文字中提取 URL
+ * 从文字中提取 URL
  */
 export function extractUrls(text: string): string[] {
   const urlRegex = /https?:\/\/[^\s<>"']+/gi;
@@ -52,7 +52,7 @@ export function extractUrls(text: string): string[] {
 }
 
 /**
- * 安全的 fetch 包裝，帶超時
+ * 安全的 fetch 包装，带超时
  */
 export async function fetchWithTimeout(
   url: string,
@@ -73,7 +73,7 @@ export async function fetchWithTimeout(
 }
 
 /**
- * HTML 實體解碼
+ * HTML 实体解码
  */
 export function decodeHtmlEntities(text: string): string {
   const entities: Record<string, string> = {
@@ -90,14 +90,14 @@ export function decodeHtmlEntities(text: string): string {
 }
 
 /**
- * 清理檔案名稱中的非法字元
+ * 清理文件名中的非法字符
  */
 export function sanitizeFilename(name: string): string {
   return name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'unknown';
 }
 
 /**
- * 格式化時間（秒 → mm:ss）
+ * 格式化时间（秒 → mm:ss）
  */
 export function formatDuration(seconds: number): string {
   if (!seconds || seconds < 0) return '00:00';
@@ -107,7 +107,7 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
- * 延遲函數
+ * 延迟函数
  */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

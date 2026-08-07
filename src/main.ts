@@ -1,17 +1,17 @@
 /**
- * 歌單匯入器插件 — 主入口
+ * 歌单导入器插件 — 主入口
  *
- * 生命週期：onInit → onHTTPRequest (API 路由) → onDeinit
+ * 生命周期：onInit → onHTTPRequest (API 路由) → onDeinit
  *
  * API 路由：
  *   GET  /api/config      — 取得配置
- *   POST /api/config      — 儲存配置
- *   GET  /api/platforms   — 取得支援平台列表
- *   POST /api/parse       — 解析分享連結
- *   POST /api/preview     — 解析 + 抓取歌單（預覽曲目）
- *   POST /api/import      — 匯入歌單到 Songloft
- *   GET  /api/status      — 取得匯入進度
- *   POST /api/test-luoxue — 測試洛雪音源伺服器連通性
+ *   POST /api/config      — 保存配置
+ *   GET  /api/platforms   — 取得支持平台列表
+ *   POST /api/parse       — 解析分享链接
+ *   POST /api/preview     — 解析 + 抓取歌单（预览曲目）
+ *   POST /api/import      — 导入歌单到 Songloft
+ *   GET  /api/status      — 取得导入进度
+ *   POST /api/test-luoxue — 测试洛雪音源服务器连通性
  */
 import { HttpRequest, HttpResponse, PluginConfig, ImportProgress, PlaylistInfo } from './types';
 import { jsonResponse, errorResponse, parseBody } from './utils';
@@ -21,14 +21,14 @@ import { fetchPlaylist } from './fetchers';
 import { testLuoxueServer } from './luoxue';
 import { importPlaylist } from './songloft-api';
 
-/** 全域匯入進度（用於輪詢） */
+/** 全局导入进度（用于轮询） */
 let currentProgress: ImportProgress | null = null;
 
-/** 快取配置 */
+/** 缓存配置 */
 let configCache: PluginConfig | null = null;
 
 /**
- * 取得配置（帶快取）
+ * 取得配置（带缓存）
  */
 async function getConfig(): Promise<PluginConfig> {
   if (!configCache) {
@@ -37,14 +37,14 @@ async function getConfig(): Promise<PluginConfig> {
   return configCache;
 }
 
-// ==================== API 處理函數 ====================
+// ==================== API 处理函数 ====================
 
 /**
  * GET /api/config — 取得配置
  */
 async function handleGetConfig(): Promise<HttpResponse> {
   const config = await getConfig();
-  // 不回傳密碼
+  // 不回传密码
   return jsonResponse({
     success: true,
     config: {
@@ -55,13 +55,13 @@ async function handleGetConfig(): Promise<HttpResponse> {
 }
 
 /**
- * POST /api/config — 儲存配置
+ * POST /api/config — 保存配置
  */
 async function handleSaveConfig(req: HttpRequest): Promise<HttpResponse> {
   const body = parseBody<Partial<PluginConfig>>(req.body);
   const currentConfig = await getConfig();
 
-  // 合併配置（密碼為 ****** 時保留原值）
+  // 合并配置（密码为 ****** 时保留原值）
   const newConfig: PluginConfig = {
     luoxueApiUrl: body.luoxueApiUrl ?? currentConfig.luoxueApiUrl,
     luoxueApiPass: body.luoxueApiPass === '******' ? currentConfig.luoxueApiPass : (body.luoxueApiPass ?? ''),
@@ -70,7 +70,7 @@ async function handleSaveConfig(req: HttpRequest): Promise<HttpResponse> {
     defaultSearchSource: body.defaultSearchSource ?? currentConfig.defaultSearchSource,
   };
 
-  // 驗證
+  // 验证
   const errors = validateConfig(newConfig);
   if (errors.length > 0) {
     return errorResponse(errors.join('; '));
@@ -78,11 +78,11 @@ async function handleSaveConfig(req: HttpRequest): Promise<HttpResponse> {
 
   await saveConfig(newConfig);
   configCache = newConfig;
-  return jsonResponse({ success: true, message: '配置已儲存' });
+  return jsonResponse({ success: true, message: '配置已保存' });
 }
 
 /**
- * GET /api/platforms — 取得支援平台
+ * GET /api/platforms — 取得支持平台
  */
 function handleGetPlatforms(): HttpResponse {
   return jsonResponse({
@@ -92,48 +92,48 @@ function handleGetPlatforms(): HttpResponse {
 }
 
 /**
- * POST /api/parse — 解析分享連結
+ * POST /api/parse — 解析分享链接
  */
 async function handleParse(req: HttpRequest): Promise<HttpResponse> {
   const body = parseBody<{ text: string }>(req.body);
   if (!body.text || body.text.trim() === '') {
-    return errorResponse('請輸入分享連結或文字');
+    return errorResponse('请输入分享链接或文字');
   }
 
   const parsed = await parseShareLink(body.text);
   if (!parsed) {
-    return errorResponse('無法識別此分享連結，請確認連結來自支援的平台');
+    return errorResponse('无法识别此分享链接，请确认链接来自支持的平台');
   }
 
   return jsonResponse({ success: true, parsed });
 }
 
 /**
- * POST /api/preview — 解析 + 抓取歌單（預覽）
+ * POST /api/preview — 解析 + 抓取歌单（预览）
  */
 async function handlePreview(req: HttpRequest): Promise<HttpResponse> {
   const body = parseBody<{ text: string }>(req.body);
   if (!body.text || body.text.trim() === '') {
-    return errorResponse('請輸入分享連結或文字');
+    return errorResponse('请输入分享链接或文字');
   }
 
-  // 步驟 1：解析連結
+  // 步骤 1：解析链接
   const parsed = await parseShareLink(body.text);
   if (!parsed) {
-    return errorResponse('無法識別此分享連結');
+    return errorResponse('无法识别此分享链接');
   }
 
-  // 步驟 2：抓取歌單
+  // 步骤 2：抓取歌单
   try {
     const playlist = await fetchPlaylist(parsed.platform, parsed.playlistId);
-    // 回傳歌單資訊（不包含完整曲目列表，避免回應過大）
+    // 回传歌单信息（不包含完整曲目列表，避免回应过大）
     const preview = {
       platform: playlist.platform,
       name: playlist.name,
       coverUrl: playlist.coverUrl,
       creator: playlist.creator,
       trackCount: playlist.tracks.length,
-      // 只回傳前 20 首作為預覽
+      // 只回传前 20 首作为预览
       previewTracks: playlist.tracks.slice(0, 20).map((t) => ({
         title: t.title,
         artist: t.artist,
@@ -143,22 +143,22 @@ async function handlePreview(req: HttpRequest): Promise<HttpResponse> {
     };
     return jsonResponse({ success: true, parsed, playlist: preview });
   } catch (e) {
-    return errorResponse(`抓取歌單失敗: ${String(e)}`);
+    return errorResponse(`抓取歌单失败: ${String(e)}`);
   }
 }
 
 /**
- * POST /api/import — 匯入歌單
+ * POST /api/import — 导入歌单
  */
 async function handleImport(req: HttpRequest): Promise<HttpResponse> {
   const body = parseBody<{ text: string; mode?: string }>(req.body);
   if (!body.text || body.text.trim() === '') {
-    return errorResponse('請輸入分享連結或文字');
+    return errorResponse('请输入分享链接或文字');
   }
 
-  // 檢查是否有正在進行的匯入
+  // 检查是否有正在进行的导入
   if (currentProgress && currentProgress.status !== 'done' && currentProgress.status !== 'error') {
-    return errorResponse('已有匯入任務正在進行，請等待完成', 409);
+    return errorResponse('已有导入任务正在进行，请等待完成', 409);
   }
 
   const config = await getConfig();
@@ -166,68 +166,68 @@ async function handleImport(req: HttpRequest): Promise<HttpResponse> {
     config.importMode = body.mode as 'download' | 'stream';
   }
 
-  // 驗證配置
+  // 验证配置
   const errors = validateConfig(config);
   if (errors.length > 0) {
     return errorResponse(`配置不完整: ${errors.join('; ')}`);
   }
 
-  // 立即回應，非同步執行匯入
-  // 先解析連結
+  // 立即回应，异步执行导入
+  // 先解析链接
   const parsed = await parseShareLink(body.text);
   if (!parsed) {
-    return errorResponse('無法識別此分享連結');
+    return errorResponse('无法识别此分享链接');
   }
 
-  // 初始化進度
+  // 初始化进度
   currentProgress = {
     total: 0,
     current: 0,
     status: 'parsing',
-    message: `正在抓取歌單: ${parsed.platform} / ${parsed.playlistId}`,
+    message: `正在抓取歌单: ${parsed.platform} / ${parsed.playlistId}`,
     errors: [],
     importedSongs: 0,
   };
 
-  // 非同步執行匯入
+  // 异步执行导入
   doImport(parsed.platform, parsed.playlistId, config).catch((e) => {
     if (currentProgress) {
       currentProgress.status = 'error';
-      currentProgress.message = `匯入失敗: ${String(e)}`;
+      currentProgress.message = `导入失败: ${String(e)}`;
     }
-    songloft.log.error(`匯入任務異常: ${String(e)}`);
+    songloft.log.error(`导入任务异常: ${String(e)}`);
   });
 
   return jsonResponse({
     success: true,
-    message: '匯入任務已啟動',
+    message: '导入任务已启动',
     parsed,
   });
 }
 
 /**
- * 非同步執行匯入
+ * 异步执行导入
  */
 async function doImport(platform: string, playlistId: string, config: PluginConfig): Promise<void> {
   if (!currentProgress) return;
 
   try {
-    // 步驟 1：抓取歌單
+    // 步骤 1：抓取歌单
     currentProgress.status = 'fetching';
-    currentProgress.message = '正在抓取歌單曲目...';
+    currentProgress.message = '正在抓取歌单曲目...';
     const playlist: PlaylistInfo = await fetchPlaylist(platform as never, playlistId);
 
-    // 步驟 2：匯入
+    // 步骤 2：导入
     await importPlaylist(playlist, config, currentProgress);
   } catch (e) {
     currentProgress.status = 'error';
-    currentProgress.message = `匯入失敗: ${String(e)}`;
-    songloft.log.error(`匯入失敗: ${String(e)}`);
+    currentProgress.message = `导入失败: ${String(e)}`;
+    songloft.log.error(`导入失败: ${String(e)}`);
   }
 }
 
 /**
- * GET /api/status — 取得匯入進度
+ * GET /api/status — 取得导入进度
  */
 function handleStatus(): HttpResponse {
   if (!currentProgress) {
@@ -237,7 +237,7 @@ function handleStatus(): HttpResponse {
 }
 
 /**
- * POST /api/test-luoxue — 測試洛雪音源伺服器
+ * POST /api/test-luoxue — 测试洛雪音源服务器
  */
 async function handleTestLuoxue(): Promise<HttpResponse> {
   const config = await getConfig();
@@ -248,7 +248,7 @@ async function handleTestLuoxue(): Promise<HttpResponse> {
 // ==================== HTTP 路由 ====================
 
 /**
- * 處理 HTTP 請求
+ * 处理 HTTP 请求
  */
 async function handleApiRequest(req: HttpRequest): Promise<HttpResponse> {
   const path = req.path;
@@ -283,47 +283,47 @@ async function handleApiRequest(req: HttpRequest): Promise<HttpResponse> {
 
     return errorResponse(`未知路由: ${method} ${path}`, 404);
   } catch (e) {
-    songloft.log.error(`API 處理異常: ${String(e)}`);
-    return errorResponse(`伺服器內部錯誤: ${String(e)}`, 500);
+    songloft.log.error(`API 处理异常: ${String(e)}`);
+    return errorResponse(`服务器内部错误: ${String(e)}`, 500);
   }
 }
 
-// ==================== 生命週期 ====================
+// ==================== 生命周期 ====================
 
 /**
  * 插件初始化
  */
 function onInit(): void {
-  songloft.log.info('歌單匯入器插件已載入');
-  // 預載入配置
+  songloft.log.info('歌单导入器插件已加载');
+  // 预加载配置
   getConfig().then((config) => {
-    songloft.log.info(`當前配置: 模式=${config.importMode}, 音質=${config.defaultQuality}`);
+    songloft.log.info(`当前配置: 模式=${config.importMode}, 音质=${config.defaultQuality}`);
     if (config.luoxueApiUrl) {
       songloft.log.info(`洛雪音源: ${config.luoxueApiUrl}`);
     } else {
-      songloft.log.warn('尚未配置洛雪音源 API 位址');
+      songloft.log.warn('尚未配置洛雪音源 API 地址');
     }
   }).catch((e) => {
-    songloft.log.error('載入配置失敗: ' + String(e));
+    songloft.log.error('加载配置失败: ' + String(e));
   });
 }
 
 /**
- * 插件卸載
+ * 插件卸载
  */
 function onDeinit(): void {
-  songloft.log.info('歌單匯入器插件已卸載');
+  songloft.log.info('歌单导入器插件已卸载');
 }
 
 /**
- * HTTP 請求處理（插件對外服務入口）
+ * HTTP 请求处理（插件对外服务入口）
  */
 function onHTTPRequest(req: HttpRequest): HttpResponse | Promise<HttpResponse> {
-  // 所有 /api/ 路徑走 API 處理
+  // 所有 /api/ 路径走 API 处理
   if (req.path.includes('/api/')) {
     return handleApiRequest(req);
   }
-  // 其他路徑返回 404（靜態資源由 Songloft 自動託管）
+  // 其他路径返回 404（静态资源由 Songloft 自动托管）
   return {
     statusCode: 404,
     headers: { 'Content-Type': 'text/plain' },
@@ -331,8 +331,8 @@ function onHTTPRequest(req: HttpRequest): HttpResponse | Promise<HttpResponse> {
   };
 }
 
-// ==================== 匯出生命週期函數 ====================
-// QuickJS 環境中，這些函數需要掛載到全域
+// ==================== 导出生命周期函数 ====================
+// QuickJS 环境中，这些函数需要挂载到全局
 
 const globalObj = globalThis as unknown as Record<string, unknown>;
 globalObj.onInit = onInit;

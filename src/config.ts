@@ -6,7 +6,7 @@ import { PluginConfig, DEFAULT_CONFIG } from './types';
 const CONFIG_KEY = 'plugin_config';
 
 /**
- * 載入配置，若不存在則回傳預設值
+ * 加载配置，若不存在则返回默认值
  */
 export async function loadConfig(): Promise<PluginConfig> {
   try {
@@ -15,35 +15,35 @@ export async function loadConfig(): Promise<PluginConfig> {
     const parsed = JSON.parse(raw) as Partial<PluginConfig>;
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch (e) {
-    songloft.log.warn('載入配置失敗，使用預設值: ' + String(e));
+    songloft.log.warn('加载配置失败，使用默认值: ' + String(e));
     return { ...DEFAULT_CONFIG };
   }
 }
 
 /**
- * 儲存配置
+ * 保存配置
  */
 export async function saveConfig(config: PluginConfig): Promise<void> {
   const raw = JSON.stringify(config);
   await songloft.storage.set(CONFIG_KEY, raw);
-  songloft.log.info('配置已儲存');
+  songloft.log.info('配置已保存');
 }
 
 /**
- * 驗證配置是否有效
+ * 验证配置是否有效
  */
 export function validateConfig(config: PluginConfig): string[] {
   const errors: string[] = [];
   if (!config.luoxueApiUrl || config.luoxueApiUrl.trim() === '') {
-    errors.push('洛雪音源 API 位址不能為空');
+    errors.push('洛雪音源 API 地址不能为空');
   } else {
     try {
       const url = new URL(config.luoxueApiUrl);
       if (!['http:', 'https:'].includes(url.protocol)) {
-        errors.push('洛雪音源 API 位址必須以 http:// 或 https:// 開頭');
+        errors.push('洛雪音源 API 地址必须以 http:// 或 https:// 开头');
       }
     } catch {
-      errors.push('洛雪音源 API 位址格式不正確');
+      errors.push('洛雪音源 API 地址格式不正确');
     }
   }
   return errors;

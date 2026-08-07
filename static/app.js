@@ -1,11 +1,10 @@
 /**
- * 歌單匯入器 — 前端邏輯
+ * 歌单导入器 — 前端逻辑
  */
 (function () {
   'use strict';
 
-  // ==================== API 基礎路徑 ====================
-  // 從當前 URL 推導插件 API 基礎路徑
+  // ==================== API 基础路径 ====================
   var pathParts = window.location.pathname.split('/');
   var pluginIdx = pathParts.indexOf('playlist-importer');
   var basePath = pluginIdx >= 0
@@ -13,7 +12,7 @@
     : '/api/v1/jsplugin/playlist-importer';
   var API_BASE = basePath + '/api';
 
-  // ==================== 工具函數 ====================
+  // ==================== 工具函数 ====================
   function api(path, method, body) {
     var opts = {
       method: method || 'GET',
@@ -41,7 +40,7 @@
     });
   }
 
-  // ==================== Tab 切換 ====================
+  // ==================== Tab 切换 ====================
   var tabBtns = document.querySelectorAll('.tab-btn');
   tabBtns.forEach(function (btn) {
     btn.addEventListener('click', function () {
@@ -53,7 +52,7 @@
     });
   });
 
-  // ==================== 配置載入 ====================
+  // ==================== 配置加载 ====================
   function loadConfig() {
     api('/config', 'GET').then(function (res) {
       if (!res.success || !res.config) return;
@@ -63,10 +62,10 @@
       $('cfg-mode').value = c.importMode || 'download';
       $('cfg-quality').value = c.defaultQuality || '320k';
       $('cfg-source').value = c.defaultSearchSource || 'kw';
-    }).catch(function (e) { console.error('載入配置失敗:', e); });
+    }).catch(function (e) { console.error('加载配置失败:', e); });
   }
 
-  // ==================== 配置儲存 ====================
+  // ==================== 配置保存 ====================
   $('btn-save-config').addEventListener('click', function () {
     var config = {
       luoxueApiUrl: $('cfg-url').value.trim(),
@@ -75,11 +74,11 @@
     api('/config', 'POST', config).then(function (res) {
       if (res.success) {
         hide($('test-result'));
-        alert('設定已儲存');
+        alert('设置已保存');
       } else {
-        alert('儲存失敗: ' + (res.error || '未知錯誤'));
+        alert('保存失败: ' + (res.error || '未知错误'));
       }
-    }).catch(function (e) { alert('儲存失敗: ' + e); });
+    }).catch(function (e) { alert('保存失败: ' + e); });
   });
 
   $('btn-save-options').addEventListener('click', function () {
@@ -90,22 +89,21 @@
     };
     api('/config', 'POST', config).then(function (res) {
       if (res.success) {
-        alert('選項已儲存');
+        alert('选项已保存');
       } else {
-        alert('儲存失敗: ' + (res.error || '未知錯誤'));
+        alert('保存失败: ' + (res.error || '未知错误'));
       }
-    }).catch(function (e) { alert('儲存失敗: ' + e); });
+    }).catch(function (e) { alert('保存失败: ' + e); });
   });
 
-  // ==================== 測試洛雪連接 ====================
+  // ==================== 测试洛雪连接 ====================
   $('btn-test').addEventListener('click', function () {
     var btn = $('btn-test');
     btn.disabled = true;
-    btn.textContent = '測試中...';
+    btn.textContent = '测试中...';
     var resultEl = $('test-result');
     hide(resultEl);
 
-    // 先儲存當前輸入的 URL
     var config = {
       luoxueApiUrl: $('cfg-url').value.trim(),
       luoxueApiPass: $('cfg-pass').value,
@@ -116,42 +114,42 @@
       show(resultEl);
       if (res.ok) {
         resultEl.className = 'test-result success';
-        resultEl.textContent = res.message || '連接正常';
+        resultEl.textContent = res.message || '连接正常';
       } else {
         resultEl.className = 'test-result fail';
-        resultEl.textContent = res.message || '連接失敗';
+        resultEl.textContent = res.message || '连接失败';
       }
     }).catch(function (e) {
       show(resultEl);
       resultEl.className = 'test-result fail';
-      resultEl.textContent = '測試失敗: ' + e;
+      resultEl.textContent = '测试失败: ' + e;
     }).finally(function () {
       btn.disabled = false;
-      btn.textContent = '測試連接';
+      btn.textContent = '测试连接';
     });
   });
 
-  // ==================== 預覽歌單 ====================
+  // ==================== 预览歌单 ====================
   $('btn-preview').addEventListener('click', function () {
     var text = $('share-input').value.trim();
-    if (!text) { alert('請先貼上分享連結'); return; }
+    if (!text) { alert('请先粘贴分享链接'); return; }
 
     var btn = $('btn-preview');
     btn.disabled = true;
-    btn.textContent = '預覽中...';
+    btn.textContent = '预览中...';
     hide($('preview-section'));
 
     api('/preview', 'POST', { text: text }).then(function (res) {
       if (!res.success) {
-        alert(res.error || '預覽失敗');
+        alert(res.error || '预览失败');
         return;
       }
       renderPreview(res.parsed, res.playlist);
     }).catch(function (e) {
-      alert('預覽失敗: ' + e);
+      alert('预览失败: ' + e);
     }).finally(function () {
       btn.disabled = false;
-      btn.textContent = '預覽歌單';
+      btn.textContent = '预览歌单';
     });
   });
 
@@ -160,8 +158,9 @@
     var tracksEl = $('preview-tracks');
 
     var platformNames = {
-      netease: '網易雲音樂', qqmusic: 'QQ音樂',
-      kuwo: '酷我音樂', kugou: '酷狗音樂',
+      netease: '网易云音乐', qqmusic: 'QQ音乐',
+      kuwo: '酷我音乐', kugou: '酷狗音乐',
+      qishui: '汽水音乐',
     };
 
     var html = '';
@@ -177,7 +176,6 @@
     html += '</div></div>';
     infoEl.innerHTML = html;
 
-    // 渲染預覽曲目
     var tracksHtml = '';
     var tracks = playlist.previewTracks || [];
     tracks.forEach(function (t, i) {
@@ -190,44 +188,43 @@
     });
     if (tracks.length < playlist.trackCount) {
       tracksHtml += '<div class="track-item" style="justify-content:center;color:var(--text-muted)">';
-      tracksHtml += '還有 ' + (playlist.trackCount - tracks.length) + ' 首...</div>';
+      tracksHtml += '还有 ' + (playlist.trackCount - tracks.length) + ' 首...</div>';
     }
     tracksEl.innerHTML = tracksHtml;
 
     show($('preview-section'));
   }
 
-  // ==================== 匯入歌單 ====================
+  // ==================== 导入歌单 ====================
   var pollTimer = null;
 
   $('btn-import').addEventListener('click', function () {
     var text = $('share-input').value.trim();
-    if (!text) { alert('請先貼上分享連結'); return; }
+    if (!text) { alert('请先粘贴分享链接'); return; }
 
     var btn = $('btn-import');
     btn.disabled = true;
-    btn.textContent = '匯入中...';
+    btn.textContent = '导入中...';
     hide($('preview-section'));
     show($('progress-section'));
     updateProgressUI({
       total: 0, current: 0, status: 'parsing',
-      message: '正在啟動匯入任務...', errors: [], importedSongs: 0,
+      message: '正在启动导入任务...', errors: [], importedSongs: 0,
     });
 
     api('/import', 'POST', { text: text }).then(function (res) {
       if (!res.success) {
-        alert(res.error || '匯入失敗');
+        alert(res.error || '导入失败');
         btn.disabled = false;
-        btn.textContent = '開始匯入';
+        btn.textContent = '开始导入';
         hide($('progress-section'));
         return;
       }
-      // 開始輪詢進度
       startPolling();
     }).catch(function (e) {
-      alert('匯入失敗: ' + e);
+      alert('导入失败: ' + e);
       btn.disabled = false;
-      btn.textContent = '開始匯入';
+      btn.textContent = '开始导入';
       hide($('progress-section'));
     });
   });
@@ -257,10 +254,10 @@
         stopPolling();
         var btn = $('btn-import');
         btn.disabled = false;
-        btn.textContent = '開始匯入';
+        btn.textContent = '开始导入';
       }
     }).catch(function (e) {
-      console.error('輪詢進度失敗:', e);
+      console.error('轮询进度失败:', e);
     });
   }
 
@@ -269,21 +266,20 @@
     $('progress-bar').style.width = percent + '%';
 
     var statusMap = {
-      parsing: '解析連結中...',
-      fetching: '抓取歌單中...',
-      downloading: '下載中...',
-      importing: '匯入中...',
-      done: '匯入完成',
-      error: '匯入失敗',
+      parsing: '解析链接中...',
+      fetching: '抓取歌单中...',
+      downloading: '下载中...',
+      importing: '导入中...',
+      done: '导入完成',
+      error: '导入失败',
     };
-    $('progress-text').textContent = p.message || statusMap[p.status] || '處理中...';
+    $('progress-text').textContent = p.message || statusMap[p.status] || '处理中...';
     $('progress-count').textContent = p.total > 0
       ? p.current + ' / ' + p.total + ' (' + p.importedSongs + ' 成功)'
       : '';
 
     $('progress-current').textContent = p.currentTrack || '';
 
-    // 顯示錯誤列表
     var errEl = $('progress-errors');
     if (p.errors && p.errors.length > 0) {
       show(errEl);
@@ -295,7 +291,7 @@
     }
   }
 
-  // ==================== 載入支援平台 ====================
+  // ==================== 加载支持平台 ====================
   function loadPlatforms() {
     api('/platforms', 'GET').then(function (res) {
       if (!res.success || !res.platforms) return;
