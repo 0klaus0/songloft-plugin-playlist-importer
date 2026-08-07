@@ -4,6 +4,7 @@
  * 支持平台：网易云音乐、QQ音乐、酷我音乐、酷狗音乐、汽水音乐
  * 支持格式：完整 URL、短链接、App 分享文字
  */
+/// <reference types="@songloft/plugin-sdk" />
 import { ParsedShareLink, Platform, PLATFORM_NAMES } from './types';
 import { extractUrls, fetchWithTimeout } from './utils';
 
@@ -127,9 +128,9 @@ function isShortLink(url: string): boolean {
  */
 async function resolveShortLink(url: string): Promise<string> {
   try {
+    // QuickJS fetch polyfill 不支持 redirect 选项，使用 X-Fetch-No-Redirect 头替代
     const resp = await fetchWithTimeout(url, {
       method: 'GET',
-      redirect: 'manual',
       headers: { 'X-Fetch-No-Redirect': 'true' },
     }, 8000);
 

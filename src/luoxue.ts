@@ -9,6 +9,7 @@
  * 同时提供跨平台搜索匹配功能：当歌单来源平台与洛雪音源平台不一致时，
  * 通过搜索目标平台找到对应歌曲 ID，再获取下载链接。
  */
+/// <reference types="@songloft/plugin-sdk" />
 import { PluginConfig, TrackInfo, LXSource, PLATFORM_TO_LX, SearchResult } from './types';
 import { fetchWithTimeout } from './utils';
 import { searchMusic as searchOnPlatform } from './fetchers';

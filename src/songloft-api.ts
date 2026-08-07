@@ -1,304 +1,107 @@
 /**
- * Songloft API 客户端 — 通过 REST API 与 Songloft 服务器交互
+ * Songloft API 客户端 — 使用 songloft SDK API 与宿主交互
  *
  * 功能：
- * - 创建歌单
- * - 搜索/新增歌曲
- * - 将歌曲加入歌单
- * - 下载文件到音乐目录
+ * - 创建歌单（songloft.playlists.create）
+ * - 搜索曲库已有歌曲（songloft.songs.search）
+ * - 创建远程歌曲（songloft.songs.create）
+ * - 下载歌曲到本地（songloft.songs.download）
+ * - 将歌曲加入歌单（songloft.playlists.addSongs）
  */
-import { TrackInfo, PlaylistInfo, ImportProgress } from './types';
-import { fetchWithTimeout, sanitizeFilename, sleep } from './utils';
+/// <reference types="@songloft/plugin-sdk" />
+import { TrackInfo, PlaylistInfo, ImportProgress, PluginConfig } from './types';
+import { sleep } from './utils';
 import { resolveTrackUrl } from './luoxue';
-import { PluginConfig } from './types';
-
-/** 缓存的认证信息 */
-let cachedToken: string | null = null;
-let cachedHostUrl: string | null = null;
-
-/**
- * 取得 JWT Token（带缓存）
- */
-async function getToken(): Promise<string> {
-  if (cachedToken) return cachedToken;
-  cachedToken = await songloft.plugin.getToken();
-  return cachedToken;
-}
-
-/**
- * 取得基础 URL（带缓存）
- */
-async function getHostUrl(): Promise<string> {
-  if (cachedHostUrl) return cachedHostUrl;
-  cachedHostUrl = await songloft.plugin.getHostUrl();
-  return cachedHostUrl.replace(/\/+$/, '');
-}
-
-/**
- * 调用 Songloft REST API
- */
-async function songloftApi(
-  path: string,
-  method = 'GET',
-  body?: unknown
-): Promise<{ status: number; data: unknown }> {
-  const host = await getHostUrl();
-  const token = await getToken();
-  const url = `${host}${path}`;
-
-  const options: Record<string, unknown> = {
-    method,
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  };
-  if (body !== undefined) {
-    options.body = JSON.stringify(body);
-  }
-
-  const resp = await fetchWithTimeout(url, options, 15000);
-  let data: unknown = null;
-  try {
-    data = JSON.parse(resp.body);
-  } catch { /* 非 JSON 回应 */ }
-
-  return { status: resp.status, data };
-}
 
 // ==================== 歌单操作 ====================
 
 /**
  * 创建新歌单
  */
-export async function createPlaylist(name: string): Promise<number> {
-  const resp = await songloftApi('/api/v1/playlists', 'POST', {
+async function createPlaylist(name: string): Promise<number> {
+  const playlist = await songloft.playlists.create({
     name,
     type: 'normal',
   });
-
-  if (resp.status !== 200 && resp.status !== 201) {
-    throw new Error(`创建歌单失败: HTTP ${resp.status}`);
-  }
-
-  const data = resp.data as Record<string, unknown>;
-  // 尝试多种回应格式
-  const playlist = data.playlist || data.data || data;
-  const id = (playlist as Record<string, unknown>)?.id || data.id;
-  if (!id) {
-    throw new Error('创建歌单成功但未取得歌单 ID');
-  }
-  return Number(id);
-}
-
-/**
- * 取得所有歌单
- */
-export async function listPlaylists(): Promise<Record<string, unknown>[]> {
-  const resp = await songloftApi('/api/v1/playlists');
-  if (resp.status !== 200) return [];
-
-  const data = resp.data as Record<string, unknown>;
-  const playlists = data.playlists || data.data || data.items || data;
-  return Array.isArray(playlists) ? playlists : [];
+  songloft.log.info(`已创建歌单: ${name} (id=${playlist.id})`);
+  return playlist.id;
 }
 
 /**
  * 将歌曲加入歌单
  */
-export async function addSongsToPlaylist(
+async function addSongsToPlaylist(
   playlistId: number,
   songIds: number[]
 ): Promise<void> {
-  const resp = await songloftApi(`/api/v1/playlists/${playlistId}/songs`, 'POST', {
-    song_ids: songIds,
-  });
-
-  if (resp.status !== 200 && resp.status !== 201) {
-    throw new Error(`加入歌单失败: HTTP ${resp.status}`);
-  }
+  const result = await songloft.playlists.addSongs(playlistId, songIds);
+  songloft.log.info(`已加入 ${result.added} 首到歌单（跳过 ${result.skipped} 首）`);
 }
 
 // ==================== 歌曲操作 ====================
 
 /**
- * 搜索曲库中已有的歌曲
+ * 在曲库中搜索已有歌曲
  */
-export async function searchExistingSongs(
-  keyword: string,
-  pageSize = 20
-): Promise<Record<string, unknown>[]> {
-  const resp = await songloftApi(
-    `/api/v1/songs?search=${encodeURIComponent(keyword)}&page=1&page_size=${pageSize}`
-  );
-  if (resp.status !== 200) return [];
+async function findExistingSong(track: TrackInfo): Promise<number | null> {
+  try {
+    const keyword = `${track.title} ${track.artist}`.trim();
+    const songs = await songloft.songs.search(keyword);
 
-  const data = resp.data as Record<string, unknown>;
-  const songs = data.songs || data.data || data.items || data;
-  return Array.isArray(songs) ? songs : [];
-}
+    for (const song of songs) {
+      const title = (song.title || '').toLowerCase();
+      const artist = (song.artist || '').toLowerCase();
+      const trackTitle = track.title.toLowerCase();
+      const trackArtist = track.artist.toLowerCase();
 
-/**
- * 尝试在曲库中匹配曲目
- */
-export async function findExistingSong(
-  track: TrackInfo
-): Promise<number | null> {
-  // 使用标题搜索
-  const results = await searchExistingSongs(track.title, 10);
-  if (results.length === 0) return null;
+      const titleMatch = title === trackTitle ||
+        title.includes(trackTitle) ||
+        trackTitle.includes(title);
+      const artistMatch = artist === '' ||
+        artist.includes(trackArtist) ||
+        trackArtist.includes(artist) ||
+        track.artist === '未知艺术家';
 
-  // 尝试精确匹配标题 + 艺术家
-  for (const song of results) {
-    const title = String(song.title || song.name || '').toLowerCase();
-    const artist = String(song.artist || song.singer || '').toLowerCase();
-
-    const titleMatch = title === track.title.toLowerCase() ||
-      title.includes(track.title.toLowerCase()) ||
-      track.title.toLowerCase().includes(title);
-    const artistMatch = artist === '' ||
-      artist.includes(track.artist.toLowerCase()) ||
-      track.artist.toLowerCase().includes(artist) ||
-      track.artist === '未知艺术家';
-
-    if (titleMatch && artistMatch) {
-      return Number(song.id);
+      if (titleMatch && artistMatch) {
+        return song.id;
+      }
     }
+  } catch (e) {
+    songloft.log.warn('搜索曲库失败: ' + String(e));
   }
-
   return null;
 }
 
 /**
- * 尝试新增一首远程歌曲到曲库
+ * 创建远程歌曲到曲库
  *
- * 尝试多种 API 端点格式，因为 Songloft API 版本可能不同。
+ * 使用 songloft.songs.create() 批量创建远程歌曲，
+ * 歌曲会自动关联到当前插件。
  */
-export async function addRemoteSong(
-  title: string,
-  artist: string,
-  url: string,
-  album?: string,
-  duration?: number
+async function createRemoteSong(
+  track: TrackInfo,
+  url: string
 ): Promise<number | null> {
-  const songData: Record<string, unknown> = {
-    type: 'remote',
-    title,
-    artist,
-    url,
-    album: album || '',
-    duration: duration || 0,
-  };
+  try {
+    const songs = await songloft.songs.create([{
+      url,
+      title: track.title,
+      artist: track.artist || '未知艺术家',
+      album: track.album || '',
+      duration: track.duration || 0,
+    }]);
 
-  // 尝试 POST /api/v1/songs
-  const resp = await songloftApi('/api/v1/songs', 'POST', songData);
-  if (resp.status === 200 || resp.status === 201) {
-    const data = resp.data as Record<string, unknown>;
-    const song = data.song || data.data || data;
-    const id = (song as Record<string, unknown>)?.id || data.id;
-    if (id) return Number(id);
+    if (songs && songs.length > 0 && songs[0].id) {
+      songloft.log.info(`已创建远程歌曲: ${track.title} (id=${songs[0].id})`);
+      return songs[0].id;
+    }
+  } catch (e) {
+    songloft.log.warn(`创建远程歌曲失败: ${track.title} - ${String(e)}`);
   }
-
-  // 尝试 POST /api/v1/songs/remote
-  const resp2 = await songloftApi('/api/v1/songs/remote', 'POST', songData);
-  if (resp2.status === 200 || resp2.status === 201) {
-    const data = resp2.data as Record<string, unknown>;
-    const song = data.song || data.data || data;
-    const id = (song as Record<string, unknown>)?.id || data.id;
-    if (id) return Number(id);
-  }
-
-  songloft.log.warn(`无法通过 API 新增远程歌曲: ${title}`);
   return null;
 }
 
 // ==================== 导入流程 ====================
-
-/**
- * 下载模式：下载音乐文件到本地音乐目录
- *
- * 通过洛雪音源获取 URL，下载文件并保存到音乐目录。
- * 下载完成后需要手动重新扫描音乐库。
- */
-async function downloadTrack(
-  config: PluginConfig,
-  track: TrackInfo,
-  progress: ImportProgress
-): Promise<boolean> {
-  // 通过洛雪音源获取下载 URL
-  const result = await resolveTrackUrl(config, track);
-  if (!result || !result.url) {
-    progress.errors.push(`无法获取下载链接: ${track.title} - ${track.artist}`);
-    return false;
-  }
-
-  // 下载文件
-  try {
-    const downloadResp = await fetchWithTimeout(result.url, {
-      method: 'GET',
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    }, 60000);
-
-    if (downloadResp.status !== 200) {
-      progress.errors.push(`下载失败 (${downloadResp.status}): ${track.title}`);
-      return false;
-    }
-
-    // 尝试通过插件 API 写入文件到音乐目录
-    const filename = sanitizeFilename(`${track.artist} - ${track.title}`) + '.mp3';
-    const musicPath = `/music/${filename}`;
-
-    // 尝试使用 fs:music 权限写入
-    try {
-      // 方法1: 通过 songloft.fs API（如果存在）
-      const fsApi = (songloft as unknown as Record<string, unknown>).fs as
-        Record<string, (path: string, content: string) => Promise<unknown>> | undefined;
-      if (fsApi && typeof fsApi.write === 'function') {
-        await fsApi.write(musicPath, downloadResp.body);
-        songloft.log.info(`已下载: ${filename}`);
-        progress.importedSongs++;
-        return true;
-      }
-    } catch (e) {
-      songloft.log.warn(`fs.write 失败: ${String(e)}`);
-    }
-
-    // 方法2: 通过 REST API 上传（如果存在端点）
-    try {
-      const host = await getHostUrl();
-      const token = await getToken();
-      const uploadResp = await fetchWithTimeout(
-        `${host}/api/v1/songs/upload`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'audio/mpeg',
-            'X-Filename': encodeURIComponent(filename),
-          },
-          body: downloadResp.body,
-        },
-        30000
-      );
-      if (uploadResp.status === 200 || uploadResp.status === 201) {
-        songloft.log.info(`已上传: ${filename}`);
-        progress.importedSongs++;
-        return true;
-      }
-    } catch (e) {
-      songloft.log.warn(`上传失败: ${String(e)}`);
-    }
-
-    // 方法3: 保存 URL 到 storage 作为后备
-    progress.errors.push(
-      `文件系统写入不可用，已获取 URL 但无法保存: ${track.title}`
-    );
-    return false;
-  } catch (e) {
-    progress.errors.push(`下载异常: ${track.title} - ${String(e)}`);
-    return false;
-  }
-}
 
 /**
  * 串流模式：获取串流 URL 并作为远程歌曲导入
@@ -316,14 +119,7 @@ async function streamTrack(
   }
 
   // 新增为远程歌曲
-  const songId = await addRemoteSong(
-    track.title,
-    track.artist,
-    result.url,
-    track.album,
-    track.duration
-  );
-
+  const songId = await createRemoteSong(track, result.url);
   if (songId) {
     progress.importedSongs++;
     return songId;
@@ -331,6 +127,46 @@ async function streamTrack(
 
   progress.errors.push(`无法新增远程歌曲: ${track.title}`);
   return null;
+}
+
+/**
+ * 下载模式：获取 URL，创建远程歌曲后下载到本地
+ */
+async function downloadTrack(
+  config: PluginConfig,
+  track: TrackInfo,
+  progress: ImportProgress
+): Promise<number | null> {
+  // 通过洛雪音源获取下载 URL
+  const result = await resolveTrackUrl(config, track);
+  if (!result || !result.url) {
+    progress.errors.push(`无法获取下载链接: ${track.title} - ${track.artist}`);
+    return null;
+  }
+
+  // 先创建远程歌曲
+  const songId = await createRemoteSong(track, result.url);
+  if (!songId) {
+    progress.errors.push(`无法创建歌曲: ${track.title}`);
+    return null;
+  }
+
+  // 尝试下载到本地
+  try {
+    const downloadResult = await songloft.songs.download(songId);
+    if (downloadResult.status === 'ok' || downloadResult.status === 'done') {
+      songloft.log.info(`已下载: ${track.title} → ${downloadResult.path}`);
+    } else if (downloadResult.error) {
+      songloft.log.warn(`下载失败但歌曲已创建: ${track.title} - ${downloadResult.error}`);
+      progress.errors.push(`下载失败（歌曲已添加为远程）: ${track.title}`);
+    }
+  } catch (e) {
+    songloft.log.warn(`下载异常（歌曲已添加为远程）: ${track.title} - ${String(e)}`);
+    progress.errors.push(`下载异常（歌曲已添加为远程）: ${track.title}`);
+  }
+
+  progress.importedSongs++;
+  return songId;
 }
 
 /**
@@ -385,7 +221,10 @@ export async function importPlaylist(
         progress.importedSongs++;
       } else if (config.importMode === 'download') {
         // 下载模式
-        await downloadTrack(config, track, progress);
+        const songId = await downloadTrack(config, track, progress);
+        if (songId) {
+          collectedSongIds.push(songId);
+        }
       } else {
         // 串流模式
         const songId = await streamTrack(config, track, progress);
@@ -403,7 +242,6 @@ export async function importPlaylist(
       try {
         const batch = collectedSongIds.splice(0);
         await addSongsToPlaylist(playlistId, batch);
-        songloft.log.info(`已加入 ${batch.length} 首到歌单`);
       } catch (e) {
         songloft.log.warn(`批次加入歌单失败: ${String(e)}`);
       }

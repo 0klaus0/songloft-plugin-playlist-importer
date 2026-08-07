@@ -13,13 +13,17 @@
  *   GET  /api/status      — 取得导入进度
  *   POST /api/test-luoxue — 测试洛雪音源服务器连通性
  */
-import { HttpRequest, HttpResponse, PluginConfig, ImportProgress, PlaylistInfo } from './types';
-import { jsonResponse, errorResponse, parseBody } from './utils';
+/// <reference types="@songloft/plugin-sdk" />
+import { jsonResponse, createRouter } from '@songloft/plugin-sdk';
+import { PluginConfig, ImportProgress, PlaylistInfo } from './types';
+import { errorResponse, parseBody } from './utils';
 import { loadConfig, saveConfig, validateConfig } from './config';
 import { parseShareLink, getSupportedPlatforms } from './parsers';
 import { fetchPlaylist } from './fetchers';
 import { testLuoxueServer } from './luoxue';
 import { importPlaylist } from './songloft-api';
+
+const router = createRouter();
 
 /** 全局导入进度（用于轮询） */
 let currentProgress: ImportProgress | null = null;
@@ -37,12 +41,10 @@ async function getConfig(): Promise<PluginConfig> {
   return configCache;
 }
 
-// ==================== API 处理函数 ====================
+// ==================== API 路由 ====================
 
-/**
- * GET /api/config — 取得配置
- */
-async function handleGetConfig(): Promise<HttpResponse> {
+/** GET /api/config — 取得配置 */
+router.get('/api/config', async () => {
   const config = await getConfig();
   // 不回传密码
   return jsonResponse({
@@ -52,12 +54,10 @@ async function handleGetConfig(): Promise<HttpResponse> {
       luoxueApiPass: config.luoxueApiPass ? '******' : '',
     },
   });
-}
+});
 
-/**
- * POST /api/config — 保存配置
- */
-async function handleSaveConfig(req: HttpRequest): Promise<HttpResponse> {
+/** POST /api/config — 保存配置 */
+router.post('/api/config', async (req) => {
   const body = parseBody<Partial<PluginConfig>>(req.body);
   const currentConfig = await getConfig();
 
@@ -79,22 +79,18 @@ async function handleSaveConfig(req: HttpRequest): Promise<HttpResponse> {
   await saveConfig(newConfig);
   configCache = newConfig;
   return jsonResponse({ success: true, message: '配置已保存' });
-}
+});
 
-/**
- * GET /api/platforms — 取得支持平台
- */
-function handleGetPlatforms(): HttpResponse {
+/** GET /api/platforms — 取得支持平台 */
+router.get('/api/platforms', () => {
   return jsonResponse({
     success: true,
     platforms: getSupportedPlatforms(),
   });
-}
+});
 
-/**
- * POST /api/parse — 解析分享链接
- */
-async function handleParse(req: HttpRequest): Promise<HttpResponse> {
+/** POST /api/parse — 解析分享链接 */
+router.post('/api/parse', async (req) => {
   const body = parseBody<{ text: string }>(req.body);
   if (!body.text || body.text.trim() === '') {
     return errorResponse('请输入分享链接或文字');
@@ -106,12 +102,10 @@ async function handleParse(req: HttpRequest): Promise<HttpResponse> {
   }
 
   return jsonResponse({ success: true, parsed });
-}
+});
 
-/**
- * POST /api/preview — 解析 + 抓取歌单（预览）
- */
-async function handlePreview(req: HttpRequest): Promise<HttpResponse> {
+/** POST /api/preview — 解析 + 抓取歌单（预览） */
+router.post('/api/preview', async (req) => {
   const body = parseBody<{ text: string }>(req.body);
   if (!body.text || body.text.trim() === '') {
     return errorResponse('请输入分享链接或文字');
@@ -145,12 +139,10 @@ async function handlePreview(req: HttpRequest): Promise<HttpResponse> {
   } catch (e) {
     return errorResponse(`抓取歌单失败: ${String(e)}`);
   }
-}
+});
 
-/**
- * POST /api/import — 导入歌单
- */
-async function handleImport(req: HttpRequest): Promise<HttpResponse> {
+/** POST /api/import — 导入歌单 */
+router.post('/api/import', async (req) => {
   const body = parseBody<{ text: string; mode?: string }>(req.body);
   if (!body.text || body.text.trim() === '') {
     return errorResponse('请输入分享链接或文字');
@@ -172,7 +164,6 @@ async function handleImport(req: HttpRequest): Promise<HttpResponse> {
     return errorResponse(`配置不完整: ${errors.join('; ')}`);
   }
 
-  // 立即回应，异步执行导入
   // 先解析链接
   const parsed = await parseShareLink(body.text);
   if (!parsed) {
@@ -203,7 +194,24 @@ async function handleImport(req: HttpRequest): Promise<HttpResponse> {
     message: '导入任务已启动',
     parsed,
   });
-}
+});
+
+/** GET /api/status — 取得导入进度 */
+router.get('/api/status', () => {
+  if (!currentProgress) {
+    return jsonResponse({ success: true, progress: null });
+  }
+  return jsonResponse({ success: true, progress: currentProgress });
+});
+
+/** POST /api/test-luoxue — 测试洛雪音源服务器 */
+router.post('/api/test-luoxue', async () => {
+  const config = await getConfig();
+  const result = await testLuoxueServer(config);
+  return jsonResponse({ success: true, ...result });
+});
+
+// ==================== 异步导入 ====================
 
 /**
  * 异步执行导入
@@ -223,68 +231,6 @@ async function doImport(platform: string, playlistId: string, config: PluginConf
     currentProgress.status = 'error';
     currentProgress.message = `导入失败: ${String(e)}`;
     songloft.log.error(`导入失败: ${String(e)}`);
-  }
-}
-
-/**
- * GET /api/status — 取得导入进度
- */
-function handleStatus(): HttpResponse {
-  if (!currentProgress) {
-    return jsonResponse({ success: true, progress: null });
-  }
-  return jsonResponse({ success: true, progress: currentProgress });
-}
-
-/**
- * POST /api/test-luoxue — 测试洛雪音源服务器
- */
-async function handleTestLuoxue(): Promise<HttpResponse> {
-  const config = await getConfig();
-  const result = await testLuoxueServer(config);
-  return jsonResponse({ success: true, ...result });
-}
-
-// ==================== HTTP 路由 ====================
-
-/**
- * 处理 HTTP 请求
- */
-async function handleApiRequest(req: HttpRequest): Promise<HttpResponse> {
-  const path = req.path;
-  const method = req.method.toUpperCase();
-
-  try {
-    // 路由匹配
-    if (path.endsWith('/api/config') && method === 'GET') {
-      return await handleGetConfig();
-    }
-    if (path.endsWith('/api/config') && method === 'POST') {
-      return await handleSaveConfig(req);
-    }
-    if (path.endsWith('/api/platforms') && method === 'GET') {
-      return handleGetPlatforms();
-    }
-    if (path.endsWith('/api/parse') && method === 'POST') {
-      return await handleParse(req);
-    }
-    if (path.endsWith('/api/preview') && method === 'POST') {
-      return await handlePreview(req);
-    }
-    if (path.endsWith('/api/import') && method === 'POST') {
-      return await handleImport(req);
-    }
-    if (path.endsWith('/api/status') && method === 'GET') {
-      return handleStatus();
-    }
-    if (path.endsWith('/api/test-luoxue') && method === 'POST') {
-      return await handleTestLuoxue();
-    }
-
-    return errorResponse(`未知路由: ${method} ${path}`, 404);
-  } catch (e) {
-    songloft.log.error(`API 处理异常: ${String(e)}`);
-    return errorResponse(`服务器内部错误: ${String(e)}`, 500);
   }
 }
 
@@ -317,24 +263,19 @@ function onDeinit(): void {
 
 /**
  * HTTP 请求处理（插件对外服务入口）
+ *
+ * req.path 是相对于 entryPath 的路径，如 "/api/config"
  */
-function onHTTPRequest(req: HttpRequest): HttpResponse | Promise<HttpResponse> {
-  // 所有 /api/ 路径走 API 处理
-  if (req.path.includes('/api/')) {
-    return handleApiRequest(req);
-  }
-  // 其他路径返回 404（静态资源由 Songloft 自动托管）
-  return {
-    statusCode: 404,
-    headers: { 'Content-Type': 'text/plain' },
-    body: 'Not Found',
-  };
+function onHTTPRequest(req: HTTPRequest): HTTPResponse | Promise<HTTPResponse> {
+  return router.handle(req);
 }
 
 // ==================== 导出生命周期函数 ====================
 // QuickJS 环境中，这些函数需要挂载到全局
 
-const globalObj = globalThis as unknown as Record<string, unknown>;
-globalObj.onInit = onInit;
-globalObj.onDeinit = onDeinit;
-globalObj.onHTTPRequest = onHTTPRequest;
+// @ts-expect-error — QuickJS 全局注入
+globalThis.onInit = onInit;
+// @ts-expect-error — QuickJS 全局注入
+globalThis.onDeinit = onDeinit;
+// @ts-expect-error — QuickJS 全局注入
+globalThis.onHTTPRequest = onHTTPRequest;

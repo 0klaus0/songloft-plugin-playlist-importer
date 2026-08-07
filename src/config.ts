@@ -1,6 +1,10 @@
 /**
  * 配置管理 — 使用 songloft.storage 持久化
+ *
+ * 注意：songloft.storage 的 set/get 直接存取 JS 对象，
+ * 无需手动 JSON.stringify/parse。
  */
+/// <reference types="@songloft/plugin-sdk" />
 import { PluginConfig, DEFAULT_CONFIG } from './types';
 
 const CONFIG_KEY = 'plugin_config';
@@ -11,8 +15,8 @@ const CONFIG_KEY = 'plugin_config';
 export async function loadConfig(): Promise<PluginConfig> {
   try {
     const raw = await songloft.storage.get(CONFIG_KEY);
-    if (!raw) return { ...DEFAULT_CONFIG };
-    const parsed = JSON.parse(raw) as Partial<PluginConfig>;
+    if (!raw || typeof raw !== 'object') return { ...DEFAULT_CONFIG };
+    const parsed = raw as Partial<PluginConfig>;
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch (e) {
     songloft.log.warn('加载配置失败，使用默认值: ' + String(e));
@@ -21,11 +25,10 @@ export async function loadConfig(): Promise<PluginConfig> {
 }
 
 /**
- * 保存配置
+ * 保存配置（直接存储对象，SDK 自动序列化）
  */
 export async function saveConfig(config: PluginConfig): Promise<void> {
-  const raw = JSON.stringify(config);
-  await songloft.storage.set(CONFIG_KEY, raw);
+  await songloft.storage.set(CONFIG_KEY, config);
   songloft.log.info('配置已保存');
 }
 

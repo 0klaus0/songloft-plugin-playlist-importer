@@ -3,6 +3,7 @@
  *
  * 同时提供跨平台搜索功能，用于歌单平台与洛雪音源平台不一致时的曲目匹配。
  */
+/// <reference types="@songloft/plugin-sdk" />
 import { PlaylistInfo, TrackInfo, Platform, LXSource, SearchResult } from './types';
 import { fetchWithTimeout, decodeHtmlEntities } from './utils';
 

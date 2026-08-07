@@ -1,6 +1,7 @@
 /**
  * 歌单导入器插件 — 类型定义
  */
+/// <reference types="@songloft/plugin-sdk" />
 
 /** 支持的音乐平台 */
 export type Platform = 'netease' | 'qqmusic' | 'kuwo' | 'kugou' | 'qishui';
@@ -89,7 +90,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   luoxueApiUrl: '',
   luoxueApiPass: '',
   defaultQuality: '320k',
-  importMode: 'download',
+  importMode: 'stream',
   defaultSearchSource: 'kw',
 };
 
@@ -102,22 +103,6 @@ export interface ImportProgress {
   message?: string;
   errors: string[];
   importedSongs: number;
-}
-
-/** HTTP 请求对象（Songloft 插件环境） */
-export interface HttpRequest {
-  method: string;
-  path: string;
-  headers: Record<string, string>;
-  body: string;
-  query: Record<string, string>;
-}
-
-/** HTTP 回应对象 */
-export interface HttpResponse {
-  statusCode: number;
-  headers: Record<string, string>;
-  body: string;
 }
 
 /** 搜索结果 */
