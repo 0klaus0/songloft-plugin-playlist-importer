@@ -1,0 +1,16 @@
+{
+  "name": "歌單匯入器",
+  "version": "1.0.0",
+  "entryPath": "playlist-importer",
+  "main": "main.js",
+  "permissions": [
+    "storage",
+    "persistent-storage",
+    "songs.read",
+    "songs.write",
+    "playlists.read",
+    "playlists.write",
+    "fs:music"
+  ],
+  "renderEngine": "webview"
+}

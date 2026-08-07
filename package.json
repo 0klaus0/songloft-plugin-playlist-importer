@@ -1,0 +1,17 @@
+{
+  "name": "songloft-plugin-playlist-importer",
+  "version": "1.0.0",
+  "description": "識別市面音樂軟件分享歌單，匯入至 Songloft 或通過洛雪音源下載",
+  "author": "songloft-community",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "songloft-plugin-builder dev",
+    "build": "songloft-plugin-builder build",
+    "validate": "songloft-plugin-builder validate"
+  },
+  "devDependencies": {
+    "@songloft/plugin-sdk": "latest",
+    "@songloft/plugin-builder": "latest",
+    "typescript": "^5.4.0"
+  }
+}
