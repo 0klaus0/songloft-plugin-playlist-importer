@@ -29,6 +29,7 @@ jobs:
 
       - name: Validate plugin
         run: npx songloft-plugin validate
+        working-directory: dist/_build
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -38,13 +39,13 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload main.js artifact
+      - name: Upload build metadata
         uses: actions/upload-artifact@v4
         with:
-          name: main.js
-          path: dist/main.js
+          name: build-metadata
+          path: dist/_build/plugin.json
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 30
 
   release:
     needs: build
