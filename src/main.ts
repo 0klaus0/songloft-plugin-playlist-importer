@@ -68,6 +68,7 @@ router.post('/api/config', async (req) => {
     defaultQuality: body.defaultQuality ?? currentConfig.defaultQuality,
     importMode: body.importMode ?? currentConfig.importMode,
     defaultSearchSource: body.defaultSearchSource ?? currentConfig.defaultSearchSource,
+    useBuiltinSource: body.useBuiltinSource ?? currentConfig.useBuiltinSource,
   };
 
   // 验证
@@ -243,11 +244,13 @@ function onInit(): void {
   songloft.log.info('歌单导入器插件已加载');
   // 预加载配置
   getConfig().then((config) => {
-    songloft.log.info(`当前配置: 模式=${config.importMode}, 音质=${config.defaultQuality}`);
-    if (config.luoxueApiUrl) {
-      songloft.log.info(`洛雪音源: ${config.luoxueApiUrl}`);
+    songloft.log.info(`当前配置: 模式=${config.importMode}, 音质=${config.defaultQuality}, 来源=${config.defaultSearchSource}`);
+    if (config.useBuiltinSource) {
+      songloft.log.info('音源模式: Songloft 内置洛雪音源（无需外部 API）');
+    } else if (config.luoxueApiUrl) {
+      songloft.log.info(`音源模式: 外部洛雪 API (${config.luoxueApiUrl})`);
     } else {
-      songloft.log.warn('尚未配置洛雪音源 API 地址');
+      songloft.log.warn('尚未配置音源，请在设置中启用内置音源或填写外部 API 地址');
     }
   }).catch((e) => {
     songloft.log.error('加载配置失败: ' + String(e));

@@ -332,30 +332,87 @@ export async function searchKugou(keyword: string, limit = 10): Promise<SearchRe
 // ==================== 汽水音乐 ====================
 
 /**
+ * 通过括号匹配算法从字符串中提取完整的 JSON 对象
+ *
+ * 用于处理大块 JSON（汽水音乐页面 _ROUTER_DATA 可能达 383KB），
+ * 简单正则无法正确匹配嵌套的花括号，因此采用括号匹配算法，
+ * 同时正确处理字符串内部的花括号和转义字符。
+ *
+ * @param str   源字符串
+ * @param start 起始花括号 '{' 的索引位置
+ * @returns 提取出的 JSON 字符串（含首尾花括号），匹配失败返回 null
+ */
+function extractJsonObjectByBraces(str: string, start: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < str.length; i++) {
+    const ch = str[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\') { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return str.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * 尝试解析 JSON 字符串，失败时尝试修复末尾多余逗号后重试
+ */
+function tryParseJson(jsonStr: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(jsonStr) as Record<string, unknown>;
+  } catch {
+    try {
+      const fixed = jsonStr.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+      return JSON.parse(fixed) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
  * 从汽水音乐分享页面提取 _ROUTER_DATA JSON
+ *
+ * 支持两种数据格式：
+ * 1. 赋值式（新格式）：`_ROUTER_DATA = {...}` 或 `window._ROUTER_DATA = {...}`，
+ *    位于 `<script data-script-src="modern-inline">` 标签内。由于 JSON 可能很大，
+ *    使用括号匹配算法提取完整 JSON。
+ * 2. 标签式（旧格式）：`<script id="_ROUTER_DATA">{...}</script>`。
  */
 function extractRouterData(html: string): Record<string, unknown> | null {
-  // 匹配 _ROUTER_DATA = {...};
-  const patterns = [
+  // 策略1: 赋值式格式 (window.)?_ROUTER_DATA = {...}
+  // 使用括号匹配算法提取完整 JSON（避免正则在大 JSON 上的回溯问题）
+  const assignPattern = /(?:window\.)?_ROUTER_DATA\s*=\s*(\{)/;
+  const assignMatch = html.match(assignPattern);
+  if (assignMatch && assignMatch.index !== undefined) {
+    const braceStart = assignMatch.index + assignMatch[0].length - 1;
+    const jsonStr = extractJsonObjectByBraces(html, braceStart);
+    if (jsonStr) {
+      const parsed = tryParseJson(jsonStr);
+      if (parsed) return parsed;
+    }
+  }
+
+  // 策略2: 标签式 <script id="_ROUTER_DATA">{...}</script>
+  const tagPatterns = [
+    /<script[^>]*id=["']_ROUTER_DATA["'][^>]*>(\{[\s\S]*?\})<\/script>/,
     /_ROUTER_DATA\s*=\s*(\{[\s\S]*?\});\s*<\/script>/,
     /_ROUTER_DATA\s*=\s*(\{[\s\S]*?\})\s*<\/script>/,
     /_ROUTER_DATA\s*=\s*(\{[\s\S]*?\});/,
   ];
 
-  for (const pattern of patterns) {
+  for (const pattern of tagPatterns) {
     const match = html.match(pattern);
     if (match) {
-      try {
-        return JSON.parse(match[1]);
-      } catch {
-        // 尝试修复 JSON 末尾多余逗号
-        try {
-          const fixed = match[1].replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
-          return JSON.parse(fixed);
-        } catch {
-          continue;
-        }
-      }
+      const parsed = tryParseJson(match[1]);
+      if (parsed) return parsed;
     }
   }
   return null;
@@ -386,12 +443,27 @@ function findAudioData(obj: unknown): Record<string, unknown> | null {
 
 /**
  * 递归查找所有音频数据（用于歌单分享，可能包含多首歌曲）
+ *
+ * 支持两种数据结构：
+ * 1. 新结构：`type === 'track'` 且有 `entity.track` 的对象，从 `entity.track` 提取曲目数据。
+ *    典型路径为 `loaderData.playlist_page.medias[]`，每个元素形如
+ *    `{ type: "track", entity: { track: {...} } }`。
+ * 2. 旧结构（备选）：包含 `trackName` 字段的对象。
  */
 function findAllAudioData(obj: unknown, results: Record<string, unknown>[] = []): Record<string, unknown>[] {
   if (!obj || typeof obj !== 'object') return results;
   const record = obj as Record<string, unknown>;
 
-  // 检查是否是包含 trackName 的音频数据
+  // 策略1（新结构）: type === 'track' 且有 entity.track，从 entity.track 提取曲目数据
+  if (record.type === 'track' && record.entity && typeof record.entity === 'object') {
+    const entity = record.entity as Record<string, unknown>;
+    if (entity.track && typeof entity.track === 'object') {
+      results.push(entity.track as Record<string, unknown>);
+      return results;
+    }
+  }
+
+  // 策略2（旧结构备选）: 检查是否是包含 trackName 的音频数据
   if (record.trackName && (record.artistName || record.url)) {
     results.push(record);
     return results;
@@ -409,6 +481,36 @@ function findAllAudioData(obj: unknown, results: Record<string, unknown>[] = [])
     }
   }
   return results;
+}
+
+/**
+ * 从汽水音乐 track 对象的 album.url_cover 中提取封面 URL
+ *
+ * url_cover 可能是字符串，也可能是对象（含 urls 数组或 uri 字段）。
+ * 旧结构则回退到 track.coverURL 字段。
+ */
+function extractQishuiCoverUrl(track: Record<string, unknown>): string {
+  const album = track.album as Record<string, unknown> | undefined;
+  if (!album || typeof album !== 'object') {
+    return String(track.coverURL || '');
+  }
+  const urlCover = album.url_cover as Record<string, unknown> | string | undefined;
+  if (!urlCover) {
+    return String(track.coverURL || '');
+  }
+  if (typeof urlCover === 'string') {
+    return urlCover;
+  }
+  if (typeof urlCover === 'object') {
+    const urlCoverObj = urlCover as Record<string, unknown>;
+    if (Array.isArray(urlCoverObj.urls) && urlCoverObj.urls.length > 0) {
+      return String(urlCoverObj.urls[0]);
+    }
+    if (urlCoverObj.uri) {
+      return String(urlCoverObj.uri);
+    }
+  }
+  return String(track.coverURL || '');
 }
 
 /**
@@ -458,38 +560,108 @@ export async function fetchQishuiPlaylist(shareId: string): Promise<PlaylistInfo
   }
 
   // 解析曲目列表
+  // 新数据结构: track 对象包含 name, artists, album, duration, id, vid
+  // 旧结构备选: trackName, artistName 等
   const tracks: TrackInfo[] = audioDataList.map((audio) => {
-    const trackName = decodeHtmlEntities(String(audio.trackName || '未知歌曲'));
-    const artistName = decodeHtmlEntities(String(audio.artistName || '未知艺术家'));
-    const duration = Math.floor(Number(audio.duration || 0));
-    const coverURL = String(audio.coverURL || '');
-    const trackInfo = audio.trackInfo as Record<string, unknown> | undefined;
-    const album = trackInfo?.album as Record<string, unknown> | undefined;
-    const albumName = album?.name ? String(album.name) : '';
+    // 歌名: track.name（新结构，不是 trackName）
+    const title = decodeHtmlEntities(String(audio.name || audio.trackName || '未知歌曲'));
+
+    // 艺术家: 从 artists 数组提取（新结构），每个元素有 name 或 simple_display_name
+    let artist = '未知艺术家';
+    if (Array.isArray(audio.artists)) {
+      const names = (audio.artists as Record<string, unknown>[])
+        .map((a) => String(a.name || a.simple_display_name || ''))
+        .filter(Boolean);
+      if (names.length > 0) {
+        artist = decodeHtmlEntities(names.join('、'));
+      }
+    } else if (audio.artistName) {
+      artist = decodeHtmlEntities(String(audio.artistName));
+    }
+
+    // 专辑: album 是对象（新结构），有 name 字段
+    let album = '';
+    const albumObj = audio.album as Record<string, unknown> | undefined;
+    if (albumObj && typeof albumObj === 'object' && albumObj.name) {
+      album = decodeHtmlEntities(String(albumObj.name));
+    } else if (typeof audio.album === 'string' && audio.album) {
+      album = decodeHtmlEntities(String(audio.album));
+    }
+
+    // 时长: duration 为毫秒（新结构），需要转换为秒；旧结构可能已是秒
+    const durationMs = Number(audio.duration || 0);
+    const duration = durationMs > 1000 ? Math.floor(durationMs / 1000) : Math.floor(durationMs);
+
+    // 曲目ID: track.id（新结构）
+    const platformSongId = String(audio.id || audio.vid || audio.trackName || '');
 
     return {
-      title: trackName,
-      artist: artistName,
-      album: albumName,
+      title,
+      artist,
+      album,
       duration,
-      platformSongId: String(trackInfo?.album?.id || audio.trackName || ''),
+      platformSongId,
       platform: 'qishui' as Platform,
     };
   });
 
-  // 从第一首获取封面和歌单信息
+  // 尝试从页面数据中提取歌单名称和元信息
+  // 歌单信息可能在 loaderData.playlist_layout 或 loaderData.playlist_page.playlistInfo 中
+  let playlistName = '';
+  let coverUrlFromPlaylist = '';
+  let creatorName = '';
+  const loaderData = (routerData.loaderData || routerData.loader_data) as Record<string, unknown> | undefined;
+  if (loaderData) {
+    const playlistLayout = loaderData.playlist_layout as Record<string, unknown> | undefined;
+    const playlistPage = loaderData.playlist_page as Record<string, unknown> | undefined;
+
+    // 歌单名称：优先 playlist_layout，其次 playlist_page.playlistInfo
+    const candidateTitle = playlistLayout?.title || playlistPage?.title
+      || playlistLayout?.name;
+    if (candidateTitle) {
+      playlistName = decodeHtmlEntities(String(candidateTitle));
+    }
+
+    // 从 playlistInfo 提取歌单元信息
+    const playlistInfo = playlistPage?.playlistInfo as Record<string, unknown> | undefined;
+    if (playlistInfo) {
+      if (!playlistName && playlistInfo.title) {
+        playlistName = decodeHtmlEntities(String(playlistInfo.title));
+      }
+      // 封面 URL
+      const urlCover = playlistInfo.url_cover as Record<string, unknown> | undefined;
+      if (urlCover) {
+        if (Array.isArray(urlCover.urls) && urlCover.urls.length > 0) {
+          coverUrlFromPlaylist = String(urlCover.urls[0]);
+        } else if (urlCover.uri) {
+          coverUrlFromPlaylist = String(urlCover.uri);
+        }
+      }
+      // 创建者
+      const owner = playlistInfo.owner as Record<string, unknown> | undefined;
+      if (owner?.nickname) {
+        creatorName = String(owner.nickname);
+      }
+    }
+  }
+
+  // 如果找不到歌单名称，使用默认名称
+  if (!playlistName) {
+    playlistName = tracks.length > 1
+      ? `汽水音乐分享 (${tracks.length}首)`
+      : String(tracks[0]?.title || '汽水音乐分享');
+  }
+
+  // 封面优先使用歌单封面，其次使用第一首曲目的封面
   const firstAudio = audioDataList[0];
-  const coverUrl = String(firstAudio.coverURL || '');
-  const playlistName = tracks.length > 1
-    ? `汽水音乐分享 (${tracks.length}首)`
-    : String(firstAudio.trackName || '汽水音乐分享');
+  const coverUrl = coverUrlFromPlaylist || extractQishuiCoverUrl(firstAudio);
 
   return {
     id: shareId,
     platform: 'qishui',
     name: playlistName,
     coverUrl,
-    creator: '汽水音乐',
+    creator: creatorName || '汽水音乐',
     trackCount: tracks.length,
     tracks,
   };

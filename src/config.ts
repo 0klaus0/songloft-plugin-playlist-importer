@@ -37,16 +37,18 @@ export async function saveConfig(config: PluginConfig): Promise<void> {
  */
 export function validateConfig(config: PluginConfig): string[] {
   const errors: string[] = [];
-  if (!config.luoxueApiUrl || config.luoxueApiUrl.trim() === '') {
-    errors.push('洛雪音源 API 地址不能为空');
-  } else {
-    try {
-      const url = new URL(config.luoxueApiUrl);
-      if (!['http:', 'https:'].includes(url.protocol)) {
-        errors.push('洛雪音源 API 地址必须以 http:// 或 https:// 开头');
+  if (!config.useBuiltinSource) {
+    if (!config.luoxueApiUrl || config.luoxueApiUrl.trim() === '') {
+      errors.push('洛雪音源 API 地址不能为空（或启用内置音源模式）');
+    } else {
+      try {
+        const url = new URL(config.luoxueApiUrl);
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          errors.push('洛雪音源 API 地址必须以 http:// 或 https:// 开头');
+        }
+      } catch {
+        errors.push('洛雪音源 API 地址格式不正确');
       }
-    } catch {
-      errors.push('洛雪音源 API 地址格式不正确');
     }
   }
   return errors;

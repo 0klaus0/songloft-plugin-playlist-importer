@@ -1,11 +1,14 @@
 # Songloft 歌单导入器插件
 
-识别市面音乐软件分享歌单，导入至 Songloft 歌单中，或通过配置洛雪音源进行下载。
+识别市面音乐软件分享歌单，导入至 Songloft 歌单中，或通过洛雪音源进行下载。
 
 ## 功能特色
 
 - **多平台歌单识别**：自动识别网易云音乐、QQ音乐、酷我音乐、酷狗音乐、汽水音乐的分享链接
 - **短链接解析**：支持 163cn.tv、url.cn、qishui.douyin.com 等短链接自动重定向解析
+- **两种音源模式**：
+  - **内置音源**（推荐）：使用 Songloft 内置洛雪音源，无需部署任何外部服务
+  - **外部 API**：自行部署洛雪音源 API 服务器，获取更稳定的下载链接
 - **歌单预览**：导入前可预览歌单名称、封面、曲目列表
 - **两种导入模式**：
   - **下载模式**：通过洛雪音源下载音乐文件到本地音乐目录
@@ -18,9 +21,10 @@
 
 1. **Songloft** v2.0+ 已安装并运行
 2. **Node.js** 18+（用于构建插件）
-3. **洛雪音源 API 服务器**（以下任一）：
-   - [lx-source](https://github.com/ZxwyWebSite/lx-source)（Go 实现，推荐）
-   - [lx-music-api-server](https://github.com/MeoProject/lx-music-api-server)（Python 实现）
+
+> **音源说明**：默认使用 Songloft 内置洛雪音源，无需额外部署。如需使用外部洛雪音源 API 服务器，可选配以下任一：
+> - [lx-source](https://github.com/ZxwyWebSite/lx-source)（Go 实现，推荐）
+> - [lx-music-api-server](https://github.com/MeoProject/lx-music-api-server)（Python 实现）
 
 ## 构建与安装
 
@@ -57,14 +61,15 @@ npm run dev
 
 ## 使用指南
 
-### 步骤 1：配置洛雪音源
+### 步骤 1：配置音源
 
 1. 在 Songloft 中打开「歌单导入器」插件页面
 2. 切换到「设置」标签
-3. 填入洛雪音源 API 服务器地址（如 `http://192.168.1.100:8080`）
-4. 如服务器有密钥验证，填入 API 密钥
-5. 点击「测试连接」确认服务器可达
-6. 点击「保存设置」
+3. 选择音源模式：
+   - **内置音源**（推荐）：使用 Songloft 内置洛雪音源，无需额外配置
+   - **外部 API**：填入洛雪音源 API 服务器地址（如 `http://192.168.1.100:8080`），如有密钥验证则填入 API 密钥
+4. 点击「测试连接」确认音源可用
+5. 点击「保存设置」
 
 ### 步骤 2：配置导入选项
 
@@ -117,9 +122,7 @@ songloft-playlist-importer/
 │   ├── luoxue.ts             # 洛雪音源客户端
 │   └── songloft-api.ts       # Songloft REST API 客户端
 ├── static/
-│   ├── index.html            # 前端 UI 页面
-│   ├── style.css             # 样式表
-│   ├── app.js                # 前端逻辑
+│   ├── index.html            # 前端 UI 页面（内联 CSS/JS）
 │   └── icon.jpg              # 插件图标
 └── dist/                     # 构建输出（自动生成）
     └── playlist-importer.jsplugin.zip
@@ -144,8 +147,9 @@ songloft-playlist-importer/
          │
          ▼
   ┌─────────────┐
-  │  洛雪音源    │  获取下载/串流 URL
-  │ luoxue.ts   │  自动跨平台搜索匹配
+  │  音源处理    │  内置音源：生成 sourceData 交给 Songloft 解析
+  │ luoxue.ts   │  外部 API：获取下载/串流 URL
+  │             │  自动跨平台搜索匹配
   └──────┬──────┘
          │
          ▼

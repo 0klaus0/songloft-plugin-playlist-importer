@@ -782,18 +782,35 @@
           <span class="card-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0M12 20h.01"/></svg>
           </span>
-          <span class="card-title">洛雪音源设置</span>
+          <span class="card-title">音源设置</span>
         </div>
 
         <div class="form-group">
-          <label class="label" for="cfg-url">音源 API 服务器地址</label>
-          <input type="text" id="cfg-url" class="input" placeholder="http://192.168.1.100:8080">
-          <p class="hint">部署 lx-source 或 lx-music-api-server 的服务器地址</p>
+          <label class="label">音源模式</label>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg-input);border:1px solid var(--border-soft);border-radius:var(--radius-sm)">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex:1">
+              <input type="radio" name="cfg-source-mode" id="cfg-mode-builtin" value="builtin" style="width:16px;height:16px;cursor:pointer">
+              <span style="font-size:var(--font-size-sm);color:var(--text-primary)">内置音源</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex:1">
+              <input type="radio" name="cfg-source-mode" id="cfg-mode-external" value="external" style="width:16px;height:16px;cursor:pointer">
+              <span style="font-size:var(--font-size-sm);color:var(--text-primary)">外部 API</span>
+            </label>
+          </div>
+          <p class="hint" id="builtin-hint">使用 Songloft 内置洛雪音源，无需单独部署 API 服务器（推荐）</p>
         </div>
 
-        <div class="form-group">
-          <label class="label" for="cfg-pass">API 密钥（可选）</label>
-          <input type="password" id="cfg-pass" class="input" placeholder="留空表示不需要">
+        <div id="external-source-fields" class="hidden">
+          <div class="form-group">
+            <label class="label" for="cfg-url">音源 API 服务器地址</label>
+            <input type="text" id="cfg-url" class="input" placeholder="http://192.168.1.100:8080">
+            <p class="hint">部署 lx-source 或 lx-music-api-server 的服务器地址</p>
+          </div>
+
+          <div class="form-group">
+            <label class="label" for="cfg-pass">API 密钥（可选）</label>
+            <input type="password" id="cfg-pass" class="input" placeholder="留空表示不需要">
+          </div>
         </div>
 
         <div class="button-row">
@@ -952,6 +969,11 @@
       api('/config', 'GET').then(function (res) {
         if (!res.success || !res.config) return;
         var c = res.config;
+        // 音源模式
+        var useBuiltin = c.useBuiltinSource !== false;
+        if ($('cfg-mode-builtin')) $('cfg-mode-builtin').checked = useBuiltin;
+        if ($('cfg-mode-external')) $('cfg-mode-external').checked = !useBuiltin;
+        toggleSourceFields();
         if ($('cfg-url')) $('cfg-url').value = c.luoxueApiUrl || '';
         if ($('cfg-pass')) $('cfg-pass').value = c.luoxueApiPass || '';
         if ($('cfg-mode')) $('cfg-mode').value = c.importMode || 'download';
@@ -960,12 +982,46 @@
       }).catch(function (e) { console.error('加载配置失败:', e); });
     }
 
+    // ==================== 音源模式切换 ====================
+    function toggleSourceFields() {
+      var builtinRadio = $('cfg-mode-builtin');
+      var externalFields = $('external-source-fields');
+      var hint = $('builtin-hint');
+      var testBtn = $('btn-test');
+      if (!builtinRadio || !externalFields) return;
+
+      if (builtinRadio.checked) {
+        hide(externalFields);
+        if (hint) hint.textContent = '使用 Songloft 内置洛雪音源，无需单独部署 API 服务器（推荐）';
+        if (testBtn) {
+          var span = testBtn.querySelector('span');
+          if (span) span.textContent = '测试内置音源';
+        }
+      } else {
+        show(externalFields);
+        if (hint) hint.textContent = '使用自行部署的洛雪音源 API 服务器获取音乐链接';
+        if (testBtn) {
+          var span2 = testBtn.querySelector('span');
+          if (span2) span2.textContent = '测试连接';
+        }
+      }
+    }
+
+    if ($('cfg-mode-builtin')) {
+      $('cfg-mode-builtin').addEventListener('change', toggleSourceFields);
+    }
+    if ($('cfg-mode-external')) {
+      $('cfg-mode-external').addEventListener('change', toggleSourceFields);
+    }
+
     // ==================== 配置保存 ====================
     if ($('btn-save-config')) {
       $('btn-save-config').addEventListener('click', function () {
+        var useBuiltin = $('cfg-mode-builtin') ? $('cfg-mode-builtin').checked : true;
         var config = {
-          luoxueApiUrl: $('cfg-url').value.trim(),
-          luoxueApiPass: $('cfg-pass').value,
+          useBuiltinSource: useBuiltin,
+          luoxueApiUrl: useBuiltin ? '' : ($('cfg-url') ? $('cfg-url').value.trim() : ''),
+          luoxueApiPass: useBuiltin ? '' : ($('cfg-pass') ? $('cfg-pass').value : ''),
         };
         api('/config', 'POST', config).then(function (res) {
           if (res.success) {
@@ -1006,9 +1062,11 @@
         var resultEl = $('test-result');
         hide(resultEl);
 
+        var useBuiltin = $('cfg-mode-builtin') ? $('cfg-mode-builtin').checked : true;
         var config = {
-          luoxueApiUrl: $('cfg-url').value.trim(),
-          luoxueApiPass: $('cfg-pass').value,
+          useBuiltinSource: useBuiltin,
+          luoxueApiUrl: useBuiltin ? '' : ($('cfg-url') ? $('cfg-url').value.trim() : ''),
+          luoxueApiPass: useBuiltin ? '' : ($('cfg-pass') ? $('cfg-pass').value : ''),
         };
         api('/config', 'POST', config).then(function () {
           return api('/test-luoxue', 'POST');

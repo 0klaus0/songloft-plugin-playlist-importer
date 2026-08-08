@@ -7,11 +7,15 @@
  * - 创建远程歌曲（songloft.songs.create）
  * - 下载歌曲到本地（songloft.songs.download）
  * - 将歌曲加入歌单（songloft.playlists.addSongs）
+ *
+ * 支持两种音源模式：
+ * - 外部洛雪 API：通过配置的 API 服务器获取音乐 URL
+ * - 内置音源模式：通过 sourceData 将平台信息传递给 Songloft，由内置洛雪音源解析
  */
 /// <reference types="@songloft/plugin-sdk" />
 import { TrackInfo, PlaylistInfo, ImportProgress, PluginConfig } from './types';
 import { sleep } from './utils';
-import { resolveTrackUrl } from './luoxue';
+import { resolveTrackUrl, generateSourceData } from './luoxue';
 
 // ==================== 歌单操作 ====================
 
@@ -73,7 +77,7 @@ async function findExistingSong(track: TrackInfo): Promise<number | null> {
 }
 
 /**
- * 创建远程歌曲到曲库
+ * 创建远程歌曲到曲库（带 URL）
  *
  * 使用 songloft.songs.create() 批量创建远程歌曲，
  * 歌曲会自动关联到当前插件。
@@ -101,6 +105,35 @@ async function createRemoteSong(
   return null;
 }
 
+/**
+ * 使用 sourceData 创建歌曲（内置音源模式）
+ *
+ * 不提供 url，而是通过 sourceData 将平台和歌曲 ID 信息
+ * 传递给 Songloft，由内置洛雪音源在播放/下载时自动解析 URL。
+ */
+async function createSongWithSourceData(
+  track: TrackInfo,
+  sourceData: string
+): Promise<number | null> {
+  try {
+    const songs = await songloft.songs.create([{
+      title: track.title,
+      artist: track.artist || '未知艺术家',
+      album: track.album || '',
+      duration: track.duration || 0,
+      sourceData,
+    }]);
+
+    if (songs && songs.length > 0 && songs[0].id) {
+      songloft.log.info(`已创建歌曲（内置音源）: ${track.title} (id=${songs[0].id})`);
+      return songs[0].id;
+    }
+  } catch (e) {
+    songloft.log.warn(`创建歌曲失败（内置音源）: ${track.title} - ${String(e)}`);
+  }
+  return null;
+}
+
 // ==================== 导入流程 ====================
 
 /**
@@ -111,7 +144,25 @@ async function streamTrack(
   track: TrackInfo,
   progress: ImportProgress
 ): Promise<number | null> {
-  // 通过洛雪音源获取串流 URL
+  if (config.useBuiltinSource || !config.luoxueApiUrl) {
+    // 内置音源模式：通过 sourceData 创建歌曲
+    const sourceData = await generateSourceData(track, config);
+    if (!sourceData) {
+      progress.errors.push(`无法匹配曲目: ${track.title} - ${track.artist}`);
+      return null;
+    }
+
+    const songId = await createSongWithSourceData(track, sourceData);
+    if (songId) {
+      progress.importedSongs++;
+      return songId;
+    }
+
+    progress.errors.push(`无法创建歌曲: ${track.title}`);
+    return null;
+  }
+
+  // 外部 API 模式：通过洛雪音源获取串流 URL
   const result = await resolveTrackUrl(config, track);
   if (!result || !result.url) {
     progress.errors.push(`无法获取串流链接: ${track.title} - ${track.artist}`);
@@ -137,18 +188,34 @@ async function downloadTrack(
   track: TrackInfo,
   progress: ImportProgress
 ): Promise<number | null> {
-  // 通过洛雪音源获取下载 URL
-  const result = await resolveTrackUrl(config, track);
-  if (!result || !result.url) {
-    progress.errors.push(`无法获取下载链接: ${track.title} - ${track.artist}`);
-    return null;
-  }
+  let songId: number | null = null;
 
-  // 先创建远程歌曲
-  const songId = await createRemoteSong(track, result.url);
-  if (!songId) {
-    progress.errors.push(`无法创建歌曲: ${track.title}`);
-    return null;
+  if (config.useBuiltinSource || !config.luoxueApiUrl) {
+    // 内置音源模式：通过 sourceData 创建歌曲，再下载
+    const sourceData = await generateSourceData(track, config);
+    if (!sourceData) {
+      progress.errors.push(`无法匹配曲目: ${track.title} - ${track.artist}`);
+      return null;
+    }
+
+    songId = await createSongWithSourceData(track, sourceData);
+    if (!songId) {
+      progress.errors.push(`无法创建歌曲: ${track.title}`);
+      return null;
+    }
+  } else {
+    // 外部 API 模式：通过洛雪音源获取下载 URL
+    const result = await resolveTrackUrl(config, track);
+    if (!result || !result.url) {
+      progress.errors.push(`无法获取下载链接: ${track.title} - ${track.artist}`);
+      return null;
+    }
+
+    songId = await createRemoteSong(track, result.url);
+    if (!songId) {
+      progress.errors.push(`无法创建歌曲: ${track.title}`);
+      return null;
+    }
   }
 
   // 尝试下载到本地

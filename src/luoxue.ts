@@ -177,6 +177,11 @@ export async function resolveTrackUrl(
   config: PluginConfig,
   track: TrackInfo
 ): Promise<LuoxueResult | null> {
+  // 内置音源模式下不使用外部 API
+  if (config.useBuiltinSource || !config.luoxueApiUrl) {
+    songloft.log.info(`内置音源模式，跳过外部 API: ${track.title}`);
+    return null;
+  }
   const trackSource = PLATFORM_TO_LX[track.platform];
   const targetSource = config.defaultSearchSource;
 
@@ -244,9 +249,60 @@ export async function resolveTrackUrl(
 }
 
 /**
+ * 为曲目生成 sourceData（用于 Songloft 内置音源模式）
+ *
+ * 当不使用外部洛雪 API 时，通过 sourceData 将平台和歌曲 ID 信息
+ * 传递给 Songloft，由内置洛雪音源自动解析播放 URL。
+ *
+ * @param track 曲目信息
+ * @param config 插件配置
+ * @returns sourceData JSON 字符串，或 null（无法生成时）
+ */
+export async function generateSourceData(
+  track: TrackInfo,
+  config: PluginConfig
+): Promise<string | null> {
+  const trackSource = PLATFORM_TO_LX[track.platform];
+  const targetSource = config.defaultSearchSource;
+
+  // 如果平台有直接对应的洛雪来源，直接使用原始 songId
+  if (trackSource) {
+    const sourceData = {
+      source: trackSource,
+      id: track.platformSongId,
+      quality: config.defaultQuality,
+      title: track.title,
+      artist: track.artist,
+    };
+    songloft.log.info(`生成 sourceData: ${track.title} → ${trackSource}/${track.platformSongId}`);
+    return JSON.stringify(sourceData);
+  }
+
+  // 平台无直接对应（如汽水音乐），跨平台搜索匹配
+  songloft.log.info(`跨平台搜索生成 sourceData: ${track.title}`);
+  const matchedId = await crossPlatformMatch(track, targetSource);
+  if (!matchedId) {
+    songloft.log.warn(`无法匹配曲目: ${track.title} - ${track.artist}`);
+    return null;
+  }
+
+  const sourceData = {
+    source: targetSource,
+    id: matchedId,
+    quality: config.defaultQuality,
+    title: track.title,
+    artist: track.artist,
+  };
+  return JSON.stringify(sourceData);
+}
+
+/**
  * 测试洛雪音源服务器连通性
  */
 export async function testLuoxueServer(config: PluginConfig): Promise<{ ok: boolean; message: string }> {
+  if (config.useBuiltinSource) {
+    return { ok: true, message: '使用 Songloft 内置音源，无需测试外部服务器' };
+  }
   if (!config.luoxueApiUrl) {
     return { ok: false, message: '未配置洛雪音源 API 地址' };
   }

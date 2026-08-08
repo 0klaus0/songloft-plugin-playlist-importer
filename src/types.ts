@@ -73,7 +73,7 @@ export interface PlaylistInfo {
 
 /** 插件配置 */
 export interface PluginConfig {
-  /** 洛雪音源 API 服务器地址（如 http://192.168.1.100:8080） */
+  /** 洛雪音源 API 服务器地址（如 http://192.168.1.100:8080），留空则使用 Songloft 内置音源 */
   luoxueApiUrl: string;
   /** 洛雪音源 API 密钥（可选） */
   luoxueApiPass: string;
@@ -83,6 +83,8 @@ export interface PluginConfig {
   importMode: ImportMode;
   /** 默认搜索来源（跨平台搜索时使用） */
   defaultSearchSource: LXSource;
+  /** 是否使用 Songloft 内置音源（true 时不需要外部洛雪 API） */
+  useBuiltinSource: boolean;
 }
 
 /** 默认配置 */
@@ -92,6 +94,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   defaultQuality: '320k',
   importMode: 'stream',
   defaultSearchSource: 'kw',
+  useBuiltinSource: true,
 };
 
 /** 导入进度回调 */
