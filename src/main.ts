@@ -161,9 +161,14 @@ router.post('/api/import', async (req) => {
     return errorResponse('请输入分享链接或文字');
   }
 
-  // 检查是否有正在进行的导入
+  // 检查是否有正在进行的导入 — 返回成功响应并携带当前进度，让前端直接显示进度面板
   if (currentProgress && currentProgress.status !== 'done' && currentProgress.status !== 'error') {
-    return errorResponse('已有导入任务正在进行，请等待完成', 409);
+    return jsonResponse({
+      success: true,
+      alreadyRunning: true,
+      message: '已有导入任务正在进行',
+      progress: currentProgress,
+    });
   }
 
   const config = await getConfig();

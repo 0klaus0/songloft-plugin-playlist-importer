@@ -1521,21 +1521,14 @@
 
         api('/import', 'POST', { text: text }).then(function (res) {
           if (!res.success) {
-            // 如果是"已有任务正在进行"，不弹错误，直接显示进度
-            if (res.error && res.error.indexOf('已有') >= 0) {
-              show($('progress-section'));
-              updateProgressUI({
-                total: 0, current: 0, status: 'importing',
-                message: '已有导入任务正在进行，显示当前进度...', errors: [],
-                importedSongs: 0, streamingSongs: 0, downloadedSongs: 0,
-              });
-              startPolling();
-            } else {
-              showToast(res.error || '导入失败', 'error');
-              setImportBtnDisabled(false);
-              hide($('progress-section'));
-            }
+            showToast(res.error || '导入失败', 'error');
+            setImportBtnDisabled(false);
+            hide($('progress-section'));
             return;
+          }
+          // 已有任务正在进行 — 直接显示当前进度并开始轮询
+          if (res.alreadyRunning && res.progress) {
+            updateProgressUI(res.progress);
           }
           startPolling();
         }).catch(function (e) {
@@ -1652,6 +1645,9 @@
         var p = res.progress;
         // 如果有正在进行的任务（非 done/error），显示进度面板并开始轮询
         if (p.status && p.status !== 'done' && p.status !== 'error') {
+          // 切换到导入标签页，确保进度面板可见
+          var importTabBtn = document.querySelector('.tab-btn[data-tab="import"]');
+          if (importTabBtn) importTabBtn.click();
           show($('progress-section'));
           setImportBtnDisabled(true);
           updateProgressUI(p);
