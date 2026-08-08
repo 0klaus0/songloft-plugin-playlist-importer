@@ -916,7 +916,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
               </button>
             </div>
-            <p class="hint">添加洛雪音源脚本地址，支持多个（按顺序尝试解析）。留空则使用默认内置音源</p>
+            <p class="hint">添加洛雪音源脚本地址（.js），插件会自动加载并执行脚本解析音乐 URL。支持多个，按顺序尝试</p>
           </div>
 
           <div class="form-group">
@@ -1201,7 +1201,7 @@
       if (builtinRadio.checked) {
         show(builtinFields);
         hide(externalFields);
-        if (hint) hint.textContent = '使用 Songloft 内置洛雪音源引擎，可填写自定义音源脚本 URL（推荐）';
+        if (hint) hint.textContent = '通过洛雪音源脚本解析音乐 URL，可添加多个脚本（推荐）';
       } else {
         hide(builtinFields);
         show(externalFields);

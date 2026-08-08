@@ -109,6 +109,10 @@ export interface ImportProgress {
   message?: string;
   errors: string[];
   importedSongs: number;
+  /** 串流歌曲数（创建成功但未下载到本地） */
+  streamingSongs: number;
+  /** 已下载到本地的歌曲数 */
+  downloadedSongs: number;
 }
 
 /** 搜索结果 */

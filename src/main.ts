@@ -180,6 +180,8 @@ router.post('/api/import', async (req) => {
     message: `正在抓取歌单: ${parsed.platform} / ${parsed.playlistId}`,
     errors: [],
     importedSongs: 0,
+    streamingSongs: 0,
+    downloadedSongs: 0,
   };
 
   // 异步执行导入
