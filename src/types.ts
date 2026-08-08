@@ -85,8 +85,8 @@ export interface PluginConfig {
   defaultSearchSource: LXSource;
   /** 是否使用 Songloft 内置音源（true 时不需要外部洛雪 API） */
   useBuiltinSource: boolean;
-  /** 自定义洛雪音源脚本 URL（如 https://ghproxy.net/raw.githubusercontent.com/pdone/lx-music-source/main/lx/latest.js） */
-  customSourceUrl: string;
+  /** 自定义洛雪音源脚本 URL 列表（支持多个，按顺序尝试） */
+  customSourceUrls: string[];
 }
 
 /** 默认配置 */
@@ -97,7 +97,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   importMode: 'stream',
   defaultSearchSource: 'kw',
   useBuiltinSource: true,
-  customSourceUrl: '',
+  customSourceUrls: [],
 };
 
 /** 导入进度回调 */

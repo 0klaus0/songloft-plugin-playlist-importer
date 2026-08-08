@@ -38,22 +38,26 @@ export async function saveConfig(config: PluginConfig): Promise<void> {
 export function validateConfig(config: PluginConfig): string[] {
   const errors: string[] = [];
 
-  // 验证自定义音源 URL（如果填写了）
-  if (config.customSourceUrl && config.customSourceUrl.trim() !== '') {
-    try {
-      const url = new URL(config.customSourceUrl.trim());
-      if (!['http:', 'https:'].includes(url.protocol)) {
-        errors.push('自定义音源 URL 必须以 http:// 或 https:// 开头');
+  // 验证自定义音源 URL 列表
+  if (config.customSourceUrls && config.customSourceUrls.length > 0) {
+    for (let i = 0; i < config.customSourceUrls.length; i++) {
+      const url = config.customSourceUrls[i].trim();
+      if (!url) continue;
+      try {
+        const parsed = new URL(url);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          errors.push(`自定义音源 URL #${i + 1} 必须以 http:// 或 https:// 开头`);
+        }
+      } catch {
+        errors.push(`自定义音源 URL #${i + 1} 格式不正确`);
       }
-    } catch {
-      errors.push('自定义音源 URL 格式不正确');
     }
   }
 
   // 外部 API 模式下验证 API 地址
-  if (!config.useBuiltinSource && !config.customSourceUrl) {
+  if (!config.useBuiltinSource && (!config.customSourceUrls || config.customSourceUrls.length === 0)) {
     if (!config.luoxueApiUrl || config.luoxueApiUrl.trim() === '') {
-      errors.push('请填写自定义音源 URL、启用内置音源模式、或填写外部 API 地址');
+      errors.push('请添加自定义音源 URL、启用内置音源模式、或填写外部 API 地址');
     } else {
       try {
         const url = new URL(config.luoxueApiUrl);

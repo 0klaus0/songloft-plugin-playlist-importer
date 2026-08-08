@@ -264,7 +264,10 @@ export async function generateSourceData(
 ): Promise<string | null> {
   const trackSource = PLATFORM_TO_LX[track.platform];
   const targetSource = config.defaultSearchSource;
-  const customUrl = config.customSourceUrl ? config.customSourceUrl.trim() : '';
+  // 收集所有自定义音源 URL（过滤空值）
+  const customUrls = (config.customSourceUrls || [])
+    .map(u => u.trim())
+    .filter(u => u.length > 0);
 
   // 如果平台有直接对应的洛雪来源，直接使用原始 songId
   if (trackSource) {
@@ -275,12 +278,11 @@ export async function generateSourceData(
       title: track.title,
       artist: track.artist,
     };
-    // 如果用户填写了自定义音源 URL，一并传入
-    if (customUrl) {
-      sourceData.sourceUrl = customUrl;
+    if (customUrls.length > 0) {
+      sourceData.sourceUrls = customUrls;
     }
     songloft.log.info(`生成 sourceData: ${track.title} → ${trackSource}/${track.platformSongId}` +
-      (customUrl ? ` (自定义音源: ${customUrl.substring(0, 50)}...)` : ''));
+      (customUrls.length > 0 ? ` (${customUrls.length} 个自定义音源)` : ''));
     return JSON.stringify(sourceData);
   }
 
@@ -299,8 +301,8 @@ export async function generateSourceData(
     title: track.title,
     artist: track.artist,
   };
-  if (customUrl) {
-    sourceData.sourceUrl = customUrl;
+  if (customUrls.length > 0) {
+    sourceData.sourceUrls = customUrls;
   }
   return JSON.stringify(sourceData);
 }
@@ -309,26 +311,41 @@ export async function generateSourceData(
  * 测试洛雪音源服务器连通性
  */
 export async function testLuoxueServer(config: PluginConfig): Promise<{ ok: boolean; message: string }> {
-  // 如果填写了自定义音源 URL，测试其连通性
-  if (config.customSourceUrl && config.customSourceUrl.trim() !== '') {
-    try {
-      const resp = await fetchWithTimeout(config.customSourceUrl.trim(), {
-        method: 'GET',
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-      }, 10000);
+  // 如果有自定义音源 URL，逐个测试连通性
+  const customUrls = (config.customSourceUrls || [])
+    .map(u => u.trim())
+    .filter(u => u.length > 0);
 
-      if (resp.status === 200) {
-        // 简单检查是否为 JavaScript 文件
-        const body = resp.body.substring(0, 500);
-        if (body.includes('function') || body.includes('=>') || body.includes('module') || body.includes('export') || body.includes('var ')) {
-          return { ok: true, message: '自定义音源脚本可访问，格式正常' };
+  if (customUrls.length > 0) {
+    const results: string[] = [];
+    let allOk = true;
+
+    for (let i = 0; i < customUrls.length; i++) {
+      try {
+        const resp = await fetchWithTimeout(customUrls[i], {
+          method: 'GET',
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+        }, 10000);
+
+        if (resp.status === 200) {
+          const body = resp.body.substring(0, 500);
+          const isJs = body.includes('function') || body.includes('=>') || body.includes('module') || body.includes('export') || body.includes('var ');
+          results.push(`#${i + 1} ${isJs ? '正常' : '可访问'}`);
+          if (!isJs) allOk = false;
+        } else {
+          results.push(`#${i + 1} 状态码 ${resp.status}`);
+          allOk = false;
         }
-        return { ok: true, message: '自定义音源链接可访问（建议确认脚本格式正确）' };
+      } catch (e) {
+        results.push(`#${i + 1} 连接失败`);
+        allOk = false;
       }
-      return { ok: false, message: `自定义音源回应状态码: ${resp.status}` };
-    } catch (e) {
-      return { ok: false, message: `自定义音源连接失败: ${String(e)}` };
     }
+
+    return {
+      ok: allOk,
+      message: `${customUrls.length} 个音源: ${results.join('，')}`,
+    };
   }
 
   if (config.useBuiltinSource) {

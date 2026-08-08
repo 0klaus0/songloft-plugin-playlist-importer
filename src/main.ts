@@ -69,7 +69,7 @@ router.post('/api/config', async (req) => {
     importMode: body.importMode ?? currentConfig.importMode,
     defaultSearchSource: body.defaultSearchSource ?? currentConfig.defaultSearchSource,
     useBuiltinSource: body.useBuiltinSource ?? currentConfig.useBuiltinSource,
-    customSourceUrl: body.customSourceUrl ?? currentConfig.customSourceUrl,
+    customSourceUrls: Array.isArray(body.customSourceUrls) ? body.customSourceUrls : currentConfig.customSourceUrls,
   };
 
   // 验证
@@ -246,8 +246,8 @@ function onInit(): void {
   // 预加载配置
   getConfig().then((config) => {
     songloft.log.info(`当前配置: 模式=${config.importMode}, 音质=${config.defaultQuality}, 来源=${config.defaultSearchSource}`);
-    if (config.customSourceUrl && config.customSourceUrl.trim() !== '') {
-      songloft.log.info(`音源模式: 自定义洛雪音源脚本 (${config.customSourceUrl.trim().substring(0, 60)}...)`);
+    if (config.customSourceUrls && config.customSourceUrls.length > 0) {
+      songloft.log.info(`音源模式: ${config.customSourceUrls.length} 个自定义洛雪音源脚本`);
     } else if (config.useBuiltinSource) {
       songloft.log.info('音源模式: Songloft 内置洛雪音源（无需外部 API）');
     } else if (config.luoxueApiUrl) {
