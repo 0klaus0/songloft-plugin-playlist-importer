@@ -208,9 +208,13 @@ async function downloadTrack(
   let songId: number | null = null;
 
   // 尝试解析直接 URL（自定义音源脚本 → 外部 API）
+  logInfo(`解析音源URL: ${track.title} - ${track.artist}`);
   const result = await resolveTrackUrl(config, track);
   if (result && result.url) {
+    logInfo(`音源URL解析成功: ${track.title} → ${result.url.substring(0, 100)}... (source=${result.source})`);
     songId = await createRemoteSong(track, result.url);
+  } else {
+    logWarn(`音源URL解析失败: ${track.title}`);
   }
 
   // 直接 URL 解析失败
@@ -241,15 +245,19 @@ async function downloadTrack(
   // 尝试下载到本地
   let downloadSuccess = false;
   try {
+    logInfo(`开始下载到本地: ${track.title} (songId=${songId})`);
     const downloadResult = await songloft.songs.download(songId);
+    logInfo(`下载结果: ${track.title} - ${JSON.stringify(downloadResult)}`);
     if (downloadResult.status === 'ok' || downloadResult.status === 'done') {
-      logInfo(`已下载: ${track.title} → ${downloadResult.path}`);
+      logInfo(`已下载: ${track.title} → ${downloadResult.path || '(路径未知)'}`);
       downloadSuccess = true;
     } else if (downloadResult.error) {
-      logInfo(`下载未成功，已作为串流歌曲保留: ${track.title} - ${downloadResult.error}`);
+      logWarn(`下载未成功，已作为串流歌曲保留: ${track.title} - ${downloadResult.error}`);
+    } else {
+      logWarn(`下载状态未知: ${track.title} - ${JSON.stringify(downloadResult)}`);
     }
   } catch (e) {
-    logInfo(`下载未成功，已作为串流歌曲保留: ${track.title} - ${String(e)}`);
+    logWarn(`下载异常，已作为串流歌曲保留: ${track.title} - ${String(e)}`);
   }
 
   if (downloadSuccess) {

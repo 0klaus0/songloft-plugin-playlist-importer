@@ -220,9 +220,10 @@ export async function resolveTrackUrl(
 
   // 优先级 1：自定义音源脚本
   if (customUrls.length > 0) {
-    logInfo(`使用自定义音源脚本解析: ${source}/${songId}`);
+    logInfo(`使用自定义音源脚本解析: ${source}/${songId} (音质=${config.defaultQuality})`);
     const url = await resolveUrlWithCustomSource(customUrls, source, songId, config.defaultQuality);
     if (url) {
+      logInfo(`自定义音源脚本解析成功: ${source}/${songId} → ${url.substring(0, 80)}...`);
       return {
         url,
         source,
@@ -231,7 +232,7 @@ export async function resolveTrackUrl(
         matched: !trackSource || source !== trackSource,
       };
     }
-    logWarn(`自定义音源脚本解析失败，尝试外部 API`);
+    logWarn(`自定义音源脚本解析失败: ${source}/${songId}`);
   }
 
   // 优先级 2：外部洛雪 API

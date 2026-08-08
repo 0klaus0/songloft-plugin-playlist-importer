@@ -570,6 +570,13 @@ async function requestMusicUrl(
   // 构造请求代码
   // 通过 __lx_request_handler 调用脚本注册的处理器
   // 处理器返回 Promise<string>（URL），我们将结果通过 __go_send 发送回主环境
+  //
+  // musicInfo 包含所有平台可能的 ID 字段，确保不同来源的脚本都能找到所需 ID：
+  // - songmid: QQ音乐 (tx)
+  // - hash: 酷狗音乐 (kg)
+  // - songId / id: 网易云音乐 (wy)
+  // - musicId / rid: 酷我音乐 (kw)
+  // - copyrightId: 咪咕音乐 (mg)
   const requestCode = `
 (function() {
   var handler = globalThis.__lx_request_handler;
@@ -582,11 +589,15 @@ async function requestMusicUrl(
     action: 'musicUrl',
     info: {
       type: ${JSON.stringify(quality)},
+      quality: ${JSON.stringify(quality)},
       musicInfo: {
         songmid: ${JSON.stringify(songId)},
         hash: ${JSON.stringify(songId)},
         songId: ${JSON.stringify(songId)},
-        id: ${JSON.stringify(songId)}
+        id: ${JSON.stringify(songId)},
+        musicId: ${JSON.stringify(songId)},
+        rid: ${JSON.stringify(songId)},
+        copyrightId: ${JSON.stringify(songId)}
       }
     }
   };
@@ -618,6 +629,7 @@ async function requestMusicUrl(
 `;
 
   try {
+    logInfo(`发送音源请求: ${source}/${songId} (音质=${quality})`);
     const result = await songloft.jsenv.executeWait(
       ENV_NAME,
       requestCode,
