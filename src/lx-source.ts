@@ -462,16 +462,14 @@ async function initEnv(scriptUrl: string): Promise<boolean> {
   }
 
   try {
-    // 销毁旧环境（如果存在）
-    if (envReady) {
-      try {
-        await songloft.jsenv.destroy(ENV_NAME);
-      } catch {
-        // 忽略错误
-      }
-      envReady = false;
-      loadedScriptUrl = null;
+    // 销毁旧环境（无论 envReady 状态，都先尝试销毁，避免 "already exists" 错误）
+    try {
+      await songloft.jsenv.destroy(ENV_NAME);
+    } catch {
+      // 环境不存在时忽略错误
     }
+    envReady = false;
+    loadedScriptUrl = null;
 
     // 创建新环境，注入 lx 初始化代码
     logInfo('创建 jsenv 子环境...');
