@@ -141,6 +141,60 @@ if (typeof TextDecoder === 'undefined') {
   };
 }
 
+// ===== console polyfill =====
+// 捕获 LX 脚本的 console 输出，通过 __go_send 转发到主环境
+if (!globalThis.console) {
+  globalThis.console = {};
+}
+var __orig_log = globalThis.console.log;
+globalThis.console.log = function() {
+  var args = Array.prototype.slice.call(arguments);
+  var msg = args.map(function(a) {
+    if (a === null) return 'null';
+    if (a === undefined) return 'undefined';
+    if (typeof a === 'object') { try { return JSON.stringify(a); } catch(e) { return String(a); } }
+    return String(a);
+  }).join(' ');
+  if (typeof __go_send === 'function') {
+    __go_send('console_log', JSON.stringify({ level: 'info', msg: msg.substring(0, 500) }));
+  }
+  if (__orig_log) __orig_log.apply(console, args);
+};
+globalThis.console.warn = function() {
+  var args = Array.prototype.slice.call(arguments);
+  var msg = args.map(function(a) {
+    if (typeof a === 'object') { try { return JSON.stringify(a); } catch(e) { return String(a); } }
+    return String(a);
+  }).join(' ');
+  if (typeof __go_send === 'function') {
+    __go_send('console_log', JSON.stringify({ level: 'warn', msg: msg.substring(0, 500) }));
+  }
+};
+globalThis.console.error = function() {
+  var args = Array.prototype.slice.call(arguments);
+  var msg = args.map(function(a) {
+    if (typeof a === 'object') { try { return JSON.stringify(a); } catch(e) { return String(a); } }
+    return String(a);
+  }).join(' ');
+  if (typeof __go_send === 'function') {
+    __go_send('console_log', JSON.stringify({ level: 'error', msg: msg.substring(0, 500) }));
+  }
+};
+globalThis.console.debug = globalThis.console.log;
+globalThis.console.info = globalThis.console.log;
+
+// ===== 诊断：检测关键全局变量可用性 =====
+var __diag = [];
+__diag.push('fetch=' + (typeof fetch !== 'undefined'));
+__diag.push('Buffer=' + (typeof Buffer !== 'undefined'));
+__diag.push('crypto=' + (typeof crypto !== 'undefined'));
+__diag.push('crypto.createHash=' + (typeof crypto !== 'undefined' && typeof crypto.createHash === 'function'));
+__diag.push('zlib=' + (typeof zlib !== 'undefined'));
+__diag.push('setTimeout=' + (typeof setTimeout !== 'undefined'));
+if (typeof __go_send === 'function') {
+  __go_send('console_log', JSON.stringify({ level: 'info', msg: '[诊断] ' + __diag.join(', ') }));
+}
+
 // ===== LX 协议接口 =====
 (function() {
   if (!globalThis.lx) {
@@ -182,6 +236,9 @@ if (typeof TextDecoder === 'undefined') {
   // lx.request: HTTP 请求（回调风格，不受跨域限制）
   // LX 脚本使用此方法发起网络请求
   lx.request = function(url, options, callback) {
+    if (typeof __go_send === 'function') {
+      __go_send('console_log', JSON.stringify({ level: 'info', msg: '[lx.request] ' + ((options||{}).method||'GET') + ' ' + url.substring(0, 200) }));
+    }
     var opts = options || {};
     var method = (opts.method || 'GET').toUpperCase();
     var headers = opts.headers || {};
@@ -219,6 +276,9 @@ if (typeof TextDecoder === 'undefined') {
 
     fetch(url, fetchOpts).then(function(resp) {
       return resp.text().then(function(text) {
+        if (typeof __go_send === 'function') {
+          __go_send('console_log', JSON.stringify({ level: 'info', msg: '[lx.request] 响应 ' + resp.status + ' ' + url.substring(0, 100) + ' body=' + text.substring(0, 300) }));
+        }
         var respHeaders = {};
         if (resp.headers && typeof resp.headers.forEach === 'function') {
           resp.headers.forEach(function(v, k) { respHeaders[k] = v; });
@@ -234,6 +294,9 @@ if (typeof TextDecoder === 'undefined') {
         callback(null, { statusCode: resp.status, status: resp.status, body: parsedBody, headers: respHeaders, raw: text }, parsedBody);
       });
     }).catch(function(err) {
+      if (typeof __go_send === 'function') {
+        __go_send('console_log', JSON.stringify({ level: 'error', msg: '[lx.request] 请求失败 ' + url.substring(0, 100) + ' err=' + String(err).substring(0, 200) }));
+      }
       callback(err, null, null);
     });
   };
@@ -323,7 +386,11 @@ if (typeof TextDecoder === 'undefined') {
     },
   };
 
-  lx.utils.log = lx.utils.log || function() {};
+  lx.utils.log = lx.utils.log || function() {
+    if (typeof console !== 'undefined' && console.log) {
+      console.log.apply(console, arguments);
+    }
+  };
 
   // Promise
   lx.Promise = lx.Promise || Promise;
@@ -425,6 +492,21 @@ async function initEnv(scriptUrl: string): Promise<boolean> {
       return false;
     }
 
+    // 收集并输出初始化阶段的 console_log 事件
+    const initConsoleLogs = result.events.filter(e => e.name === 'console_log');
+    for (const cl of initConsoleLogs) {
+      try {
+        const clData = JSON.parse(cl.data);
+        if (clData.level === 'error' || clData.level === 'warn') {
+          logWarn(`[音源脚本] ${clData.msg}`);
+        } else {
+          logInfo(`[音源脚本] ${clData.msg}`);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     // 解析 inited 事件，获取支持的来源
     const initedEvent = result.events.find(e => e.name === 'inited');
     if (!initedEvent) {
@@ -516,13 +598,23 @@ async function requestMusicUrl(
       result.then(function(url) {
         __go_send('musicUrl_result', JSON.stringify({ url: String(url) }));
       }).catch(function(err) {
-        __go_send('musicUrl_error', JSON.stringify({ error: String(err) }));
+        var errInfo = {
+          message: err && err.message ? err.message : String(err),
+          stack: err && err.stack ? String(err.stack).substring(0, 500) : '',
+          name: err && err.name ? err.name : ''
+        };
+        __go_send('musicUrl_error', JSON.stringify(errInfo));
       });
     } else {
       __go_send('musicUrl_result', JSON.stringify({ url: String(result || '') }));
     }
   } catch(e) {
-    __go_send('musicUrl_error', JSON.stringify({ error: String(e) }));
+    var errInfo2 = {
+      message: e && e.message ? e.message : String(e),
+      stack: e && e.stack ? String(e.stack).substring(0, 500) : '',
+      name: e && e.name ? e.name : ''
+    };
+    __go_send('musicUrl_error', JSON.stringify(errInfo2));
   }
 })();
 `;
@@ -540,6 +632,23 @@ async function requestMusicUrl(
       return null;
     }
 
+    // 收集并输出 console_log 事件（脚本调试输出）
+    const consoleLogs = result.events.filter(e => e.name === 'console_log');
+    for (const cl of consoleLogs) {
+      try {
+        const clData = JSON.parse(cl.data);
+        if (clData.level === 'error') {
+          logWarn(`[音源脚本] ${clData.msg}`);
+        } else if (clData.level === 'warn') {
+          logWarn(`[音源脚本] ${clData.msg}`);
+        } else {
+          logInfo(`[音源脚本] ${clData.msg}`);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     // 查找结果事件
     const successEvent = result.events.find(e => e.name === 'musicUrl_result');
     if (successEvent) {
@@ -555,7 +664,10 @@ async function requestMusicUrl(
     const errorEvent = result.events.find(e => e.name === 'musicUrl_error');
     if (errorEvent) {
       const data = JSON.parse(errorEvent.data);
-      logWarn(`音源解析失败: ${source}/${songId} - ${data.error}`);
+      const errMsg = data.message || data.error || 'unknown';
+      const errStack = data.stack ? ` | stack: ${data.stack.substring(0, 200)}` : '';
+      const errName = data.name ? ` [${data.name}]` : '';
+      logWarn(`音源解析失败: ${source}/${songId} - ${errName}${errMsg}${errStack}`);
       return null;
     }
 
