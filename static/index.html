@@ -1493,37 +1493,54 @@
 
     // ==================== 导入歌单 ====================
     var pollTimer = null;
+    var importBtnOriginalText = '开始导入';
+
+    function setImportBtnDisabled(disabled) {
+      var btn = $('btn-import');
+      if (!btn) return;
+      btn.disabled = disabled;
+      var spanEl = btn.querySelector('span');
+      if (spanEl) {
+        spanEl.textContent = disabled ? '导入中...' : importBtnOriginalText;
+      }
+    }
 
     if ($('btn-import')) {
       $('btn-import').addEventListener('click', function () {
         var text = $('share-input').value.trim();
         if (!text) { showToast('请先粘贴分享链接', 'error'); return; }
 
-        var btn = $('btn-import');
-        btn.disabled = true;
-        var spanEl = btn.querySelector('span');
-        var originalText = spanEl ? spanEl.textContent : '开始导入';
-        if (spanEl) spanEl.textContent = '导入中...';
+        setImportBtnDisabled(true);
         hide($('preview-section'));
         show($('progress-section'));
         updateProgressUI({
           total: 0, current: 0, status: 'parsing',
           message: '正在启动导入任务...', errors: [], importedSongs: 0,
+          streamingSongs: 0, downloadedSongs: 0,
         });
 
         api('/import', 'POST', { text: text }).then(function (res) {
           if (!res.success) {
-            showToast(res.error || '导入失败', 'error');
-            btn.disabled = false;
-            if (spanEl) spanEl.textContent = originalText;
-            hide($('progress-section'));
+            // 如果是"已有任务正在进行"，不弹错误，直接显示进度
+            if (res.error && res.error.indexOf('已有') >= 0) {
+              show($('progress-section'));
+              updateProgressUI({
+                total: 0, current: 0, status: 'importing',
+                message: '已有导入任务正在进行，显示当前进度...', errors: [],
+                importedSongs: 0, streamingSongs: 0, downloadedSongs: 0,
+              });
+              startPolling();
+            } else {
+              showToast(res.error || '导入失败', 'error');
+              setImportBtnDisabled(false);
+              hide($('progress-section'));
+            }
             return;
           }
           startPolling();
         }).catch(function (e) {
           showToast('导入失败: ' + e, 'error');
-          btn.disabled = false;
-          if (spanEl) spanEl.textContent = originalText;
+          setImportBtnDisabled(false);
           hide($('progress-section'));
         });
       });
@@ -1546,16 +1563,14 @@
       api('/status', 'GET').then(function (res) {
         if (!res.success || !res.progress) {
           stopPolling();
+          setImportBtnDisabled(false);
           return;
         }
         updateProgressUI(res.progress);
 
         if (res.progress.status === 'done' || res.progress.status === 'error') {
           stopPolling();
-          var btn = $('btn-import');
-          btn.disabled = false;
-          var spanEl = btn.querySelector('span');
-          if (spanEl) spanEl.textContent = '开始导入';
+          setImportBtnDisabled(false);
           if (res.progress.status === 'done') {
             showToast('导入完成');
           }
@@ -1578,11 +1593,32 @@
         error: '导入失败',
       };
       $('progress-text').textContent = p.message || statusMap[p.status] || '处理中...';
-      $('progress-count').textContent = p.total > 0
-        ? p.current + ' / ' + p.total + ' (' + p.importedSongs + ' 成功)'
-        : '';
+
+      // 构建计数文字：显示当前进度 + 成功数 + 下载/串流明细
+      var countParts = [];
+      if (p.total > 0) {
+        countParts.push(p.current + ' / ' + p.total);
+      }
+      if (p.importedSongs > 0) {
+        countParts.push(p.importedSongs + ' 成功');
+      }
+      if (p.downloadedSongs > 0) {
+        countParts.push(p.downloadedSongs + ' 已下载');
+      }
+      if (p.streamingSongs > 0) {
+        countParts.push(p.streamingSongs + ' 串流');
+      }
+      if (p.errors && p.errors.length > 0) {
+        countParts.push(p.errors.length + ' 失败');
+      }
+      $('progress-count').textContent = countParts.join(' · ');
 
       $('progress-current').textContent = p.currentTrack || '';
+
+      // 导入完成时显示总结
+      if (p.status === 'done' && p.message) {
+        $('progress-text').textContent = p.message;
+      }
 
       var errEl = $('progress-errors');
       if (p.errors && p.errors.length > 0) {
@@ -1609,6 +1645,22 @@
     // ==================== 初始化 ====================
     loadConfig();
     loadPlatforms();
+
+    // 页面加载时检查是否有正在进行的导入任务
+    api('/status', 'GET').then(function (res) {
+      if (res.success && res.progress) {
+        var p = res.progress;
+        // 如果有正在进行的任务（非 done/error），显示进度面板并开始轮询
+        if (p.status && p.status !== 'done' && p.status !== 'error') {
+          show($('progress-section'));
+          setImportBtnDisabled(true);
+          updateProgressUI(p);
+          startPolling();
+        }
+      }
+    }).catch(function () {
+      // 忽略
+    });
 
     // ==================== 日志查看 ====================
     var logAutoRefresh = false;
