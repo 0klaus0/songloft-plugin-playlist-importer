@@ -797,9 +797,25 @@
               <span style="font-size:var(--font-size-sm);color:var(--text-primary)">外部 API</span>
             </label>
           </div>
-          <p class="hint" id="builtin-hint">使用 Songloft 内置洛雪音源，无需单独部署 API 服务器（推荐）</p>
+          <p class="hint" id="source-mode-hint">使用 Songloft 内置洛雪音源，无需单独部署 API 服务器（推荐）</p>
         </div>
 
+        <!-- 内置音源模式：选择音源平台 -->
+        <div id="builtin-source-fields">
+          <div class="form-group">
+            <label class="label" for="cfg-builtin-source">音源平台</label>
+            <select id="cfg-builtin-source" class="select">
+              <option value="kw">酷我音乐</option>
+              <option value="kg">酷狗音乐</option>
+              <option value="tx">QQ音乐</option>
+              <option value="wy">网易云音乐</option>
+              <option value="mg">咪咕音乐</option>
+            </select>
+            <p class="hint">选择内置洛雪音源使用的搜索平台，导入时会从此平台搜索匹配歌曲</p>
+          </div>
+        </div>
+
+        <!-- 外部 API 模式：填写 API 地址 -->
         <div id="external-source-fields" class="hidden">
           <div class="form-group">
             <label class="label" for="cfg-url">音源 API 服务器地址</label>
@@ -811,6 +827,28 @@
             <label class="label" for="cfg-pass">API 密钥（可选）</label>
             <input type="password" id="cfg-pass" class="input" placeholder="留空表示不需要">
           </div>
+
+          <div class="form-group">
+            <label class="label" for="cfg-external-source">搜索来源</label>
+            <select id="cfg-external-source" class="select">
+              <option value="kw">酷我音乐</option>
+              <option value="kg">酷狗音乐</option>
+              <option value="tx">QQ音乐</option>
+              <option value="wy">网易云音乐</option>
+              <option value="mg">咪咕音乐</option>
+            </select>
+            <p class="hint">跨平台匹配时使用的搜索平台</p>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="label" for="cfg-quality">默认音质</label>
+          <select id="cfg-quality" class="select">
+            <option value="128k">128kbps（标准）</option>
+            <option value="320k">320kbps（高质量）</option>
+            <option value="flac">FLAC（无损）</option>
+            <option value="flac24bit">FLAC 24bit（Hi-Res）</option>
+          </select>
         </div>
 
         <div class="button-row">
@@ -840,28 +878,6 @@
             <option value="download">下载模式 — 下载音乐文件到本地</option>
             <option value="stream">串流模式 — 以远程歌曲形式导入</option>
           </select>
-        </div>
-
-        <div class="form-group">
-          <label class="label" for="cfg-quality">默认音质</label>
-          <select id="cfg-quality" class="select">
-            <option value="128k">128kbps（标准）</option>
-            <option value="320k">320kbps（高质量）</option>
-            <option value="flac">FLAC（无损）</option>
-            <option value="flac24bit">FLAC 24bit（Hi-Res）</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="label" for="cfg-source">默认搜索来源</label>
-          <select id="cfg-source" class="select">
-            <option value="kw">酷我音乐</option>
-            <option value="kg">酷狗音乐</option>
-            <option value="tx">QQ音乐</option>
-            <option value="wy">网易云音乐</option>
-            <option value="mg">咪咕音乐</option>
-          </select>
-          <p class="hint">跨平台匹配时使用的搜索平台</p>
         </div>
 
         <button id="btn-save-options" class="btn btn-primary btn-block" type="button">
@@ -969,41 +985,35 @@
       api('/config', 'GET').then(function (res) {
         if (!res.success || !res.config) return;
         var c = res.config;
-        // 音源模式
         var useBuiltin = c.useBuiltinSource !== false;
         if ($('cfg-mode-builtin')) $('cfg-mode-builtin').checked = useBuiltin;
         if ($('cfg-mode-external')) $('cfg-mode-external').checked = !useBuiltin;
         toggleSourceFields();
         if ($('cfg-url')) $('cfg-url').value = c.luoxueApiUrl || '';
         if ($('cfg-pass')) $('cfg-pass').value = c.luoxueApiPass || '';
-        if ($('cfg-mode')) $('cfg-mode').value = c.importMode || 'download';
+        if ($('cfg-builtin-source')) $('cfg-builtin-source').value = c.defaultSearchSource || 'kw';
+        if ($('cfg-external-source')) $('cfg-external-source').value = c.defaultSearchSource || 'kw';
+        if ($('cfg-mode')) $('cfg-mode').value = c.importMode || 'stream';
         if ($('cfg-quality')) $('cfg-quality').value = c.defaultQuality || '320k';
-        if ($('cfg-source')) $('cfg-source').value = c.defaultSearchSource || 'kw';
       }).catch(function (e) { console.error('加载配置失败:', e); });
     }
 
     // ==================== 音源模式切换 ====================
     function toggleSourceFields() {
       var builtinRadio = $('cfg-mode-builtin');
+      var builtinFields = $('builtin-source-fields');
       var externalFields = $('external-source-fields');
-      var hint = $('builtin-hint');
-      var testBtn = $('btn-test');
-      if (!builtinRadio || !externalFields) return;
+      var hint = $('source-mode-hint');
+      if (!builtinRadio || !builtinFields || !externalFields) return;
 
       if (builtinRadio.checked) {
+        show(builtinFields);
         hide(externalFields);
         if (hint) hint.textContent = '使用 Songloft 内置洛雪音源，无需单独部署 API 服务器（推荐）';
-        if (testBtn) {
-          var span = testBtn.querySelector('span');
-          if (span) span.textContent = '测试内置音源';
-        }
       } else {
+        hide(builtinFields);
         show(externalFields);
         if (hint) hint.textContent = '使用自行部署的洛雪音源 API 服务器获取音乐链接';
-        if (testBtn) {
-          var span2 = testBtn.querySelector('span');
-          if (span2) span2.textContent = '测试连接';
-        }
       }
     }
 
@@ -1014,6 +1024,15 @@
       $('cfg-mode-external').addEventListener('change', toggleSourceFields);
     }
 
+    // ==================== 获取当前搜索来源 ====================
+    function getCurrentSearchSource() {
+      var useBuiltin = $('cfg-mode-builtin') ? $('cfg-mode-builtin').checked : true;
+      if (useBuiltin) {
+        return $('cfg-builtin-source') ? $('cfg-builtin-source').value : 'kw';
+      }
+      return $('cfg-external-source') ? $('cfg-external-source').value : 'kw';
+    }
+
     // ==================== 配置保存 ====================
     if ($('btn-save-config')) {
       $('btn-save-config').addEventListener('click', function () {
@@ -1022,6 +1041,8 @@
           useBuiltinSource: useBuiltin,
           luoxueApiUrl: useBuiltin ? '' : ($('cfg-url') ? $('cfg-url').value.trim() : ''),
           luoxueApiPass: useBuiltin ? '' : ($('cfg-pass') ? $('cfg-pass').value : ''),
+          defaultSearchSource: getCurrentSearchSource(),
+          defaultQuality: $('cfg-quality') ? $('cfg-quality').value : '320k',
         };
         api('/config', 'POST', config).then(function (res) {
           if (res.success) {
@@ -1037,9 +1058,7 @@
     if ($('btn-save-options')) {
       $('btn-save-options').addEventListener('click', function () {
         var config = {
-          importMode: $('cfg-mode').value,
-          defaultQuality: $('cfg-quality').value,
-          defaultSearchSource: $('cfg-source').value,
+          importMode: $('cfg-mode') ? $('cfg-mode').value : 'stream',
         };
         api('/config', 'POST', config).then(function (res) {
           if (res.success) {
@@ -1067,6 +1086,8 @@
           useBuiltinSource: useBuiltin,
           luoxueApiUrl: useBuiltin ? '' : ($('cfg-url') ? $('cfg-url').value.trim() : ''),
           luoxueApiPass: useBuiltin ? '' : ($('cfg-pass') ? $('cfg-pass').value : ''),
+          defaultSearchSource: getCurrentSearchSource(),
+          defaultQuality: $('cfg-quality') ? $('cfg-quality').value : '320k',
         };
         api('/config', 'POST', config).then(function () {
           return api('/test-luoxue', 'POST');
