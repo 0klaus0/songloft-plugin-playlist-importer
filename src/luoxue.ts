@@ -264,17 +264,23 @@ export async function generateSourceData(
 ): Promise<string | null> {
   const trackSource = PLATFORM_TO_LX[track.platform];
   const targetSource = config.defaultSearchSource;
+  const customUrl = config.customSourceUrl ? config.customSourceUrl.trim() : '';
 
   // 如果平台有直接对应的洛雪来源，直接使用原始 songId
   if (trackSource) {
-    const sourceData = {
+    const sourceData: Record<string, unknown> = {
       source: trackSource,
       id: track.platformSongId,
       quality: config.defaultQuality,
       title: track.title,
       artist: track.artist,
     };
-    songloft.log.info(`生成 sourceData: ${track.title} → ${trackSource}/${track.platformSongId}`);
+    // 如果用户填写了自定义音源 URL，一并传入
+    if (customUrl) {
+      sourceData.sourceUrl = customUrl;
+    }
+    songloft.log.info(`生成 sourceData: ${track.title} → ${trackSource}/${track.platformSongId}` +
+      (customUrl ? ` (自定义音源: ${customUrl.substring(0, 50)}...)` : ''));
     return JSON.stringify(sourceData);
   }
 
@@ -286,13 +292,16 @@ export async function generateSourceData(
     return null;
   }
 
-  const sourceData = {
+  const sourceData: Record<string, unknown> = {
     source: targetSource,
     id: matchedId,
     quality: config.defaultQuality,
     title: track.title,
     artist: track.artist,
   };
+  if (customUrl) {
+    sourceData.sourceUrl = customUrl;
+  }
   return JSON.stringify(sourceData);
 }
 
@@ -300,6 +309,28 @@ export async function generateSourceData(
  * 测试洛雪音源服务器连通性
  */
 export async function testLuoxueServer(config: PluginConfig): Promise<{ ok: boolean; message: string }> {
+  // 如果填写了自定义音源 URL，测试其连通性
+  if (config.customSourceUrl && config.customSourceUrl.trim() !== '') {
+    try {
+      const resp = await fetchWithTimeout(config.customSourceUrl.trim(), {
+        method: 'GET',
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      }, 10000);
+
+      if (resp.status === 200) {
+        // 简单检查是否为 JavaScript 文件
+        const body = resp.body.substring(0, 500);
+        if (body.includes('function') || body.includes('=>') || body.includes('module') || body.includes('export') || body.includes('var ')) {
+          return { ok: true, message: '自定义音源脚本可访问，格式正常' };
+        }
+        return { ok: true, message: '自定义音源链接可访问（建议确认脚本格式正确）' };
+      }
+      return { ok: false, message: `自定义音源回应状态码: ${resp.status}` };
+    } catch (e) {
+      return { ok: false, message: `自定义音源连接失败: ${String(e)}` };
+    }
+  }
+
   if (config.useBuiltinSource) {
     return { ok: true, message: '使用 Songloft 内置音源，无需测试外部服务器' };
   }

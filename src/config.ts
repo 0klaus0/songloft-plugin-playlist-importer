@@ -37,9 +37,23 @@ export async function saveConfig(config: PluginConfig): Promise<void> {
  */
 export function validateConfig(config: PluginConfig): string[] {
   const errors: string[] = [];
-  if (!config.useBuiltinSource) {
+
+  // 验证自定义音源 URL（如果填写了）
+  if (config.customSourceUrl && config.customSourceUrl.trim() !== '') {
+    try {
+      const url = new URL(config.customSourceUrl.trim());
+      if (!['http:', 'https:'].includes(url.protocol)) {
+        errors.push('自定义音源 URL 必须以 http:// 或 https:// 开头');
+      }
+    } catch {
+      errors.push('自定义音源 URL 格式不正确');
+    }
+  }
+
+  // 外部 API 模式下验证 API 地址
+  if (!config.useBuiltinSource && !config.customSourceUrl) {
     if (!config.luoxueApiUrl || config.luoxueApiUrl.trim() === '') {
-      errors.push('洛雪音源 API 地址不能为空（或启用内置音源模式）');
+      errors.push('请填写自定义音源 URL、启用内置音源模式、或填写外部 API 地址');
     } else {
       try {
         const url = new URL(config.luoxueApiUrl);

@@ -800,8 +800,14 @@
           <p class="hint" id="source-mode-hint">使用 Songloft 内置洛雪音源，无需单独部署 API 服务器（推荐）</p>
         </div>
 
-        <!-- 内置音源模式：选择音源平台 -->
+        <!-- 内置音源模式：自定义音源 URL + 选择音源平台 -->
         <div id="builtin-source-fields">
+          <div class="form-group">
+            <label class="label" for="cfg-custom-source">自定义音源 URL</label>
+            <input type="text" id="cfg-custom-source" class="input" placeholder="https://ghproxy.net/raw.githubusercontent.com/pdone/lx-music-source/main/lx/latest.js">
+            <p class="hint">填写洛雪音源脚本地址，由 Songloft 内置引擎加载并解析（留空则使用默认内置音源）</p>
+          </div>
+
           <div class="form-group">
             <label class="label" for="cfg-builtin-source">音源平台</label>
             <select id="cfg-builtin-source" class="select">
@@ -811,7 +817,7 @@
               <option value="wy">网易云音乐</option>
               <option value="mg">咪咕音乐</option>
             </select>
-            <p class="hint">选择内置洛雪音源使用的搜索平台，导入时会从此平台搜索匹配歌曲</p>
+            <p class="hint">选择跨平台搜索匹配时使用的搜索平台</p>
           </div>
         </div>
 
@@ -991,6 +997,7 @@
         toggleSourceFields();
         if ($('cfg-url')) $('cfg-url').value = c.luoxueApiUrl || '';
         if ($('cfg-pass')) $('cfg-pass').value = c.luoxueApiPass || '';
+        if ($('cfg-custom-source')) $('cfg-custom-source').value = c.customSourceUrl || '';
         if ($('cfg-builtin-source')) $('cfg-builtin-source').value = c.defaultSearchSource || 'kw';
         if ($('cfg-external-source')) $('cfg-external-source').value = c.defaultSearchSource || 'kw';
         if ($('cfg-mode')) $('cfg-mode').value = c.importMode || 'stream';
@@ -1009,7 +1016,7 @@
       if (builtinRadio.checked) {
         show(builtinFields);
         hide(externalFields);
-        if (hint) hint.textContent = '使用 Songloft 内置洛雪音源，无需单独部署 API 服务器（推荐）';
+        if (hint) hint.textContent = '使用 Songloft 内置洛雪音源引擎，可填写自定义音源脚本 URL（推荐）';
       } else {
         hide(builtinFields);
         show(externalFields);
@@ -1041,6 +1048,7 @@
           useBuiltinSource: useBuiltin,
           luoxueApiUrl: useBuiltin ? '' : ($('cfg-url') ? $('cfg-url').value.trim() : ''),
           luoxueApiPass: useBuiltin ? '' : ($('cfg-pass') ? $('cfg-pass').value : ''),
+          customSourceUrl: $('cfg-custom-source') ? $('cfg-custom-source').value.trim() : '',
           defaultSearchSource: getCurrentSearchSource(),
           defaultQuality: $('cfg-quality') ? $('cfg-quality').value : '320k',
         };
@@ -1086,6 +1094,7 @@
           useBuiltinSource: useBuiltin,
           luoxueApiUrl: useBuiltin ? '' : ($('cfg-url') ? $('cfg-url').value.trim() : ''),
           luoxueApiPass: useBuiltin ? '' : ($('cfg-pass') ? $('cfg-pass').value : ''),
+          customSourceUrl: $('cfg-custom-source') ? $('cfg-custom-source').value.trim() : '',
           defaultSearchSource: getCurrentSearchSource(),
           defaultQuality: $('cfg-quality') ? $('cfg-quality').value : '320k',
         };
