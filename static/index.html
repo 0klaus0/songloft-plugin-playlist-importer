@@ -1574,7 +1574,11 @@
     }
 
     function updateProgressUI(p) {
-      var percent = p.total > 0 ? Math.round((p.current / p.total) * 100) : 0;
+      // 阶段 1（解析音源）使用 resolveTotal/resolveCurrent，阶段 2（下载）使用 total/current
+      var isResolving = p.phase === 'resolving';
+      var displayTotal = isResolving ? (p.resolveTotal || p.total) : p.total;
+      var displayCurrent = isResolving ? (p.resolveCurrent || p.current) : p.current;
+      var percent = displayTotal > 0 ? Math.round((displayCurrent / displayTotal) * 100) : 0;
       $('progress-bar').style.width = percent + '%';
 
       var statusMap = {
@@ -1589,8 +1593,8 @@
 
       // 构建计数文字：显示当前进度 + 成功数 + 下载/串流明细
       var countParts = [];
-      if (p.total > 0) {
-        countParts.push(p.current + ' / ' + p.total);
+      if (displayTotal > 0) {
+        countParts.push(displayCurrent + ' / ' + displayTotal);
       }
       if (p.importedSongs > 0) {
         countParts.push(p.importedSongs + ' 成功');

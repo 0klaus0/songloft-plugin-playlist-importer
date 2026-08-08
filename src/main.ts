@@ -198,6 +198,9 @@ router.post('/api/import', async (req) => {
     importedSongs: 0,
     streamingSongs: 0,
     downloadedSongs: 0,
+    phase: 'resolving',
+    resolveTotal: 0,
+    resolveCurrent: 0,
   };
 
   // 异步执行导入

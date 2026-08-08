@@ -270,25 +270,47 @@ async function downloadTrack(
 }
 
 /**
- * 执行歌单导入
+ * 执行歌单导入（两阶段并发优化）
+ *
+ * 阶段 1 — 预解析音源 URL（顺序执行，复用 jsenv 环境）
+ *   逐首解析音源 URL，曲库已有的歌曲直接跳过。
+ *   解析结果暂存，不创建歌曲也不下载。
+ *
+ * 阶段 2 — 并发创建歌曲并下载（并发数 = DOWNLOAD_CONCURRENCY）
+ *   将阶段 1 的解析结果分批并发处理：创建远程歌曲 → 下载到本地 → 加入歌单。
+ *   下载是网络 I/O，并发处理可大幅缩短总耗时。
  *
  * @param playlist 来源歌单信息
  * @param config 插件配置
  * @param progress 进度回调（会被直接修改）
  * @returns 导入的歌单 ID
  */
+
+/** 并发下载数 */
+const DOWNLOAD_CONCURRENCY = 3;
+
+/** 预解析结果 */
+interface ResolvedTrack {
+  track: TrackInfo;
+  url: string | null;
+  sourceData: string | null;
+}
+
 export async function importPlaylist(
   playlist: PlaylistInfo,
   config: PluginConfig,
   progress: ImportProgress
 ): Promise<number | null> {
-  progress.status = 'importing';
+  progress.status = 'parsing';
+  progress.phase = 'resolving';
   progress.total = playlist.tracks.length;
   progress.current = 0;
   progress.importedSongs = 0;
   progress.streamingSongs = 0;
   progress.downloadedSongs = 0;
   progress.errors = [];
+  progress.resolveTotal = playlist.tracks.length;
+  progress.resolveCurrent = 0;
 
   // 创建 Songloft 歌单
   const playlistName = `[导入] ${playlist.name}`;
@@ -302,61 +324,156 @@ export async function importPlaylist(
     return null;
   }
 
-  // 逐一处理曲目
   const collectedSongIds: number[] = [];
-  const batchDelay = 300; // 每首歌之间延迟，避免请求过快
+
+  // ==================== 阶段 1：预解析音源 URL（顺序） ====================
+  logInfo(`阶段 1/2: 预解析音源 URL (${playlist.tracks.length} 首)`);
+  const resolvedTracks: ResolvedTrack[] = [];
+
+  const hasCustomSource = (config.customSourceUrls || []).some(u => u.trim().length > 0);
+  const hasExternalApi = config.luoxueApiUrl && !config.useBuiltinSource;
+  const hasAnySource = hasCustomSource || hasExternalApi;
 
   for (let i = 0; i < playlist.tracks.length; i++) {
     const track = playlist.tracks[i];
+    progress.resolveCurrent = i + 1;
     progress.current = i + 1;
     progress.currentTrack = `${track.title} - ${track.artist}`;
-    progress.status = config.importMode === 'download' ? 'downloading' : 'importing';
+    progress.message = `[1/2] 解析音源 ${i + 1}/${playlist.tracks.length}: ${track.title}`;
 
-    logInfo(`处理曲目 ${i + 1}/${playlist.tracks.length}: ${track.title}`);
+    logInfo(`解析 ${i + 1}/${playlist.tracks.length}: ${track.title}`);
 
     try {
-      // 步骤 1：先检查曲库中是否已有此歌曲
+      // 先检查曲库中是否已有此歌曲
       const existingId = await findExistingSong(track);
       if (existingId) {
         logInfo(`曲库已有此歌曲: ${track.title} (id=${existingId})`);
         collectedSongIds.push(existingId);
         progress.importedSongs++;
-      } else if (config.importMode === 'download') {
-        // 下载模式
-        const songId = await downloadTrack(config, track, progress);
-        if (songId) {
-          collectedSongIds.push(songId);
+        continue;
+      }
+
+      let url: string | null = null;
+      let sourceData: string | null = null;
+
+      if (hasAnySource) {
+        // 有音源配置：解析 URL
+        const result = await resolveTrackUrl(config, track);
+        if (result && result.url) {
+          url = result.url;
+          logInfo(`URL 解析成功: ${track.title} → ${url.substring(0, 80)}...`);
+        } else {
+          logWarn(`URL 解析失败: ${track.title}`);
+          progress.errors.push(`音源解析失败: ${track.title} - ${track.artist}`);
+        }
+      } else {
+        // 无音源配置：生成 sourceData
+        sourceData = await generateSourceData(track, config);
+        if (!sourceData) {
+          progress.errors.push(`无法匹配曲目: ${track.title} - ${track.artist}`);
+        }
+      }
+
+      resolvedTracks.push({ track, url, sourceData });
+    } catch (e) {
+      progress.errors.push(`解析失败: ${track.title} - ${String(e)}`);
+    }
+
+    // 短延迟，避免请求过快
+    if (i < playlist.tracks.length - 1) {
+      await sleep(200);
+    }
+  }
+
+  logInfo(`阶段 1 完成: ${collectedSongIds.length} 首已存在, ${resolvedTracks.length} 首待处理`);
+
+  // ==================== 阶段 2：并发创建歌曲并下载 ====================
+  logInfo(`阶段 2/2: 并发创建和下载 (并发数=${DOWNLOAD_CONCURRENCY})`);
+  progress.phase = 'downloading';
+  progress.status = config.importMode === 'download' ? 'downloading' : 'importing';
+  progress.total = resolvedTracks.length;
+  progress.current = 0;
+
+  for (let i = 0; i < resolvedTracks.length; i += DOWNLOAD_CONCURRENCY) {
+    const batch = resolvedTracks.slice(i, i + DOWNLOAD_CONCURRENCY);
+    const batchStartIdx = i;
+
+    // 并发处理这一批
+    const promises = batch.map(async (item, batchIdx) => {
+      const globalIdx = batchStartIdx + batchIdx;
+      const { track, url, sourceData } = item;
+
+      progress.current = globalIdx + 1;
+      progress.currentTrack = `${track.title} - ${track.artist}`;
+      progress.message = `[2/2] ${config.importMode === 'download' ? '下载' : '导入'} ${globalIdx + 1}/${resolvedTracks.length}: ${track.title}`;
+
+      // 无 URL 且无 sourceData，跳过（解析阶段已记录错误）
+      if (!url && !sourceData) {
+        return null;
+      }
+
+      let songId: number | null = null;
+
+      // 创建歌曲
+      if (url) {
+        songId = await createRemoteSong(track, url);
+      } else if (sourceData) {
+        songId = await createSongWithSourceData(track, sourceData);
+      }
+
+      if (!songId) {
+        progress.errors.push(`无法创建歌曲: ${track.title}`);
+        return null;
+      }
+
+      // 下载模式：尝试下载到本地
+      if (config.importMode === 'download') {
+        let downloadSuccess = false;
+        try {
+          logInfo(`开始下载: ${track.title} (songId=${songId})`);
+          const downloadResult = await songloft.songs.download(songId);
+          logInfo(`下载结果: ${track.title} - ${JSON.stringify(downloadResult)}`);
+          if (downloadResult.status === 'ok' || downloadResult.status === 'done') {
+            logInfo(`已下载: ${track.title} → ${downloadResult.path || '(路径未知)'}`);
+            downloadSuccess = true;
+          } else if (downloadResult.error) {
+            logWarn(`下载未成功，已作为串流歌曲保留: ${track.title} - ${downloadResult.error}`);
+          }
+        } catch (e) {
+          logWarn(`下载异常，已作为串流歌曲保留: ${track.title} - ${String(e)}`);
+        }
+
+        if (downloadSuccess) {
+          progress.downloadedSongs++;
+        } else {
+          progress.streamingSongs++;
         }
       } else {
         // 串流模式
-        const songId = await streamTrack(config, track, progress);
-        if (songId) {
-          collectedSongIds.push(songId);
-        }
+        progress.streamingSongs++;
       }
-    } catch (e) {
-      progress.errors.push(`处理失败: ${track.title} - ${String(e)}`);
-    }
 
-    // 批次加入歌单（每 10 首或最后一首）
-    if ((collectedSongIds.length > 0 && collectedSongIds.length % 10 === 0) ||
-        (i === playlist.tracks.length - 1 && collectedSongIds.length > 0)) {
+      progress.importedSongs++;
+      return songId;
+    });
+
+    const results = await Promise.all(promises);
+
+    // 将成功的歌曲 ID 加入歌单
+    const newIds = results.filter(id => id !== null) as number[];
+    if (newIds.length > 0) {
       try {
-        const batch = collectedSongIds.splice(0);
-        await addSongsToPlaylist(playlistId, batch);
+        await addSongsToPlaylist(playlistId, newIds);
       } catch (e) {
         logWarn(`批次加入歌单失败: ${String(e)}`);
       }
     }
-
-    // 延迟，避免请求过快被封
-    if (i < playlist.tracks.length - 1) {
-      await sleep(batchDelay);
-    }
   }
 
+  // ==================== 完成 ====================
   progress.status = 'done';
-  let msg = `导入完成：成功 ${progress.importedSongs}/${progress.total} 首`;
+  progress.phase = undefined;
+  let msg = `导入完成：成功 ${progress.importedSongs}/${playlist.tracks.length} 首`;
   if (progress.downloadedSongs > 0) {
     msg += `（已下载 ${progress.downloadedSongs} 首`;
     if (progress.streamingSongs > 0) {

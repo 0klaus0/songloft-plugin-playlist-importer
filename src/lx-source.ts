@@ -446,16 +446,23 @@ async function downloadScript(url: string): Promise<string | null> {
 /**
  * 初始化 jsenv 环境并加载音源脚本
  *
+ * 优化：环境创建后持久复用，不会每首歌都重新创建。
+ * 如果 executeWait 导致环境失效，requestMusicUrl 会标记 envReady=false，
+ * 下次调用 initEnv 时自动重建。
+ *
  * @param scriptUrl 音源脚本 URL
  * @returns 是否成功初始化
  */
 async function initEnv(scriptUrl: string): Promise<boolean> {
   // 如果已经加载了同一个脚本，直接返回
   if (envReady && loadedScriptUrl === scriptUrl) {
+    logInfo(`音源环境已就绪，复用现有环境: ${scriptUrl.substring(0, 60)}...`);
     return true;
   }
 
-  // 下载脚本
+  logInfo(`initEnv: envReady=${envReady}, loadedScriptUrl=${loadedScriptUrl ? loadedScriptUrl.substring(0, 40) : 'null'}, scriptUrl=${scriptUrl.substring(0, 40)}...`);
+
+  // 下载脚本（有缓存，不会重复下载）
   const scriptCode = await downloadScript(scriptUrl);
   if (!scriptCode) {
     return false;
@@ -541,6 +548,7 @@ async function initEnv(scriptUrl: string): Promise<boolean> {
 
     envReady = true;
     loadedScriptUrl = scriptUrl;
+    logInfo('音源环境初始化完成，后续歌曲将复用此环境');
     return true;
   } catch (e) {
     logError(`初始化音源环境失败: ${String(e)}`);
@@ -550,34 +558,17 @@ async function initEnv(scriptUrl: string): Promise<boolean> {
 }
 
 /**
- * 通过音源脚本请求音乐 URL
+ * 构造音源 URL 请求代码
  *
- * @param source 音源标识（kw/kg/tx/wy/mg）
- * @param songId 歌曲 ID
- * @param quality 音质（128k/320k/flac/flac24bit）
- * @returns 音乐 URL 或 null
+ * musicInfo 包含所有平台可能的 ID 字段，确保不同来源的脚本都能找到所需 ID：
+ * - songmid: QQ音乐 (tx)
+ * - hash: 酷狗音乐 (kg)
+ * - songId / id: 网易云音乐 (wy)
+ * - musicId / rid: 酷我音乐 (kw)
+ * - copyrightId: 咪咕音乐 (mg)
  */
-async function requestMusicUrl(
-  source: string,
-  songId: string,
-  quality: string
-): Promise<string | null> {
-  if (!envReady) {
-    logWarn('音源环境未初始化');
-    return null;
-  }
-
-  // 构造请求代码
-  // 通过 __lx_request_handler 调用脚本注册的处理器
-  // 处理器返回 Promise<string>（URL），我们将结果通过 __go_send 发送回主环境
-  //
-  // musicInfo 包含所有平台可能的 ID 字段，确保不同来源的脚本都能找到所需 ID：
-  // - songmid: QQ音乐 (tx)
-  // - hash: 酷狗音乐 (kg)
-  // - songId / id: 网易云音乐 (wy)
-  // - musicId / rid: 酷我音乐 (kw)
-  // - copyrightId: 咪咕音乐 (mg)
-  const requestCode = `
+function buildRequestCode(source: string, songId: string, quality: string): string {
+  return `
 (function() {
   var handler = globalThis.__lx_request_handler;
   if (!handler) {
@@ -627,6 +618,27 @@ async function requestMusicUrl(
   }
 })();
 `;
+}
+
+/**
+ * 通过音源脚本请求音乐 URL
+ *
+ * @param source 音源标识（kw/kg/tx/wy/mg）
+ * @param songId 歌曲 ID
+ * @param quality 音质（128k/320k/flac/flac24bit）
+ * @returns 音乐 URL 或 null
+ */
+async function requestMusicUrl(
+  source: string,
+  songId: string,
+  quality: string
+): Promise<string | null> {
+  if (!envReady) {
+    logWarn('音源环境未初始化');
+    return null;
+  }
+
+  const requestCode = buildRequestCode(source, songId, quality);
 
   try {
     logInfo(`发送音源请求: ${source}/${songId} (音质=${quality})`);
@@ -639,6 +651,8 @@ async function requestMusicUrl(
 
     if (result.error) {
       logWarn(`音源请求执行错误: ${result.error}`);
+      // 环境可能已失效，标记为需要重新初始化
+      envReady = false;
       return null;
     }
 
@@ -685,6 +699,8 @@ async function requestMusicUrl(
     return null;
   } catch (e) {
     logError(`音源请求异常: ${String(e)}`);
+    // 环境可能已失效，标记为需要重新初始化
+    envReady = false;
     return null;
   }
 }

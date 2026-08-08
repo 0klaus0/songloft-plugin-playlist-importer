@@ -113,6 +113,12 @@ export interface ImportProgress {
   streamingSongs: number;
   /** 已下载到本地的歌曲数 */
   downloadedSongs: number;
+  /** 当前阶段：resolving=解析音源URL, downloading=下载歌曲 */
+  phase?: 'resolving' | 'downloading';
+  /** 解析阶段总数 */
+  resolveTotal?: number;
+  /** 解析阶段当前数 */
+  resolveCurrent?: number;
 }
 
 /** 搜索结果 */
