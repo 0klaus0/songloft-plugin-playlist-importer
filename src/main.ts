@@ -12,6 +12,8 @@
  *   POST /api/import      — 导入歌单到 Songloft
  *   GET  /api/status      — 取得导入进度
  *   POST /api/test-luoxue — 测试洛雪音源服务器连通性
+ *   GET  /api/logs        — 取得日志
+ *   POST /api/logs/clear  — 清空日志
  */
 /// <reference types="@songloft/plugin-sdk" />
 import { jsonResponse, createRouter } from '@songloft/plugin-sdk';
@@ -22,6 +24,7 @@ import { parseShareLink, getSupportedPlatforms } from './parsers';
 import { fetchPlaylist } from './fetchers';
 import { testLuoxueServer } from './luoxue';
 import { importPlaylist } from './songloft-api';
+import { getLogs, clearLogs, restoreLogs, logInfo, logWarn, logError } from './logger';
 
 const router = createRouter();
 
@@ -190,7 +193,7 @@ router.post('/api/import', async (req) => {
       currentProgress.status = 'error';
       currentProgress.message = `导入失败: ${String(e)}`;
     }
-    songloft.log.error(`导入任务异常: ${String(e)}`);
+    logError(`导入任务异常: ${String(e)}`);
   });
 
   return jsonResponse({
@@ -215,6 +218,28 @@ router.post('/api/test-luoxue', async () => {
   return jsonResponse({ success: true, ...result });
 });
 
+/** GET /api/logs — 取得日志 */
+router.get('/api/logs', async (req) => {
+  let limit = 0;
+  try {
+    const q = (req as { query?: string }).query;
+    if (q) {
+      const params = new URLSearchParams(q);
+      const l = params.get('limit');
+      if (l) limit = parseInt(l, 10) || 0;
+    }
+  } catch {
+    // ignore
+  }
+  return jsonResponse({ success: true, logs: getLogs(limit) });
+});
+
+/** POST /api/logs/clear — 清空日志 */
+router.post('/api/logs/clear', async () => {
+  await clearLogs();
+  return jsonResponse({ success: true, message: '日志已清空' });
+});
+
 // ==================== 异步导入 ====================
 
 /**
@@ -234,7 +259,7 @@ async function doImport(platform: string, playlistId: string, config: PluginConf
   } catch (e) {
     currentProgress.status = 'error';
     currentProgress.message = `导入失败: ${String(e)}`;
-    songloft.log.error(`导入失败: ${String(e)}`);
+    logError(`导入失败: ${String(e)}`);
   }
 }
 
@@ -243,22 +268,24 @@ async function doImport(platform: string, playlistId: string, config: PluginConf
 /**
  * 插件初始化
  */
-function onInit(): void {
-  songloft.log.info('歌单导入器插件已加载');
+async function onInit(): Promise<void> {
+  // 恢复持久化日志
+  await restoreLogs();
+  logInfo('歌单导入器插件已加载');
   // 预加载配置
   getConfig().then((config) => {
-    songloft.log.info(`当前配置: 模式=${config.importMode}, 音质=${config.defaultQuality}, 来源=${config.defaultSearchSource}`);
+    logInfo(`当前配置: 模式=${config.importMode}, 音质=${config.defaultQuality}, 来源=${config.defaultSearchSource}`);
     if (config.customSourceUrls && config.customSourceUrls.length > 0) {
-      songloft.log.info(`音源模式: ${config.customSourceUrls.length} 个自定义洛雪音源脚本`);
+      logInfo(`音源模式: ${config.customSourceUrls.length} 个自定义洛雪音源脚本`);
     } else if (config.useBuiltinSource) {
-      songloft.log.info('音源模式: Songloft 内置洛雪音源（无需外部 API）');
+      logInfo('音源模式: Songloft 内置洛雪音源（无需外部 API）');
     } else if (config.luoxueApiUrl) {
-      songloft.log.info(`音源模式: 外部洛雪 API (${config.luoxueApiUrl})`);
+      logInfo(`音源模式: 外部洛雪 API (${config.luoxueApiUrl})`);
     } else {
-      songloft.log.warn('尚未配置音源，请在设置中填写自定义音源 URL、启用内置音源或填写外部 API 地址');
+      logWarn('尚未配置音源，请在设置中填写自定义音源 URL、启用内置音源或填写外部 API 地址');
     }
   }).catch((e) => {
-    songloft.log.error('加载配置失败: ' + String(e));
+    logError('加载配置失败: ' + String(e));
   });
 }
 
@@ -266,7 +293,7 @@ function onInit(): void {
  * 插件卸载
  */
 function onDeinit(): void {
-  songloft.log.info('歌单导入器插件已卸载');
+  logInfo('歌单导入器插件已卸载');
 }
 
 /**

@@ -16,6 +16,7 @@
 import { TrackInfo, PlaylistInfo, ImportProgress, PluginConfig } from './types';
 import { sleep } from './utils';
 import { resolveTrackUrl, generateSourceData } from './luoxue';
+import { logInfo, logWarn, logError } from './logger';
 
 // ==================== 歌单操作 ====================
 
@@ -27,7 +28,7 @@ async function createPlaylist(name: string): Promise<number> {
     name,
     type: 'normal',
   });
-  songloft.log.info(`已创建歌单: ${name} (id=${playlist.id})`);
+  logInfo(`已创建歌单: ${name} (id=${playlist.id})`);
   return playlist.id;
 }
 
@@ -39,7 +40,7 @@ async function addSongsToPlaylist(
   songIds: number[]
 ): Promise<void> {
   const result = await songloft.playlists.addSongs(playlistId, songIds);
-  songloft.log.info(`已加入 ${result.added} 首到歌单（跳过 ${result.skipped} 首）`);
+  logInfo(`已加入 ${result.added} 首到歌单（跳过 ${result.skipped} 首）`);
 }
 
 // ==================== 歌曲操作 ====================
@@ -71,7 +72,7 @@ async function findExistingSong(track: TrackInfo): Promise<number | null> {
       }
     }
   } catch (e) {
-    songloft.log.warn('搜索曲库失败: ' + String(e));
+    logWarn('搜索曲库失败: ' + String(e));
   }
   return null;
 }
@@ -96,11 +97,11 @@ async function createRemoteSong(
     }]);
 
     if (songs && songs.length > 0 && songs[0].id) {
-      songloft.log.info(`已创建远程歌曲: ${track.title} (id=${songs[0].id})`);
+      logInfo(`已创建远程歌曲: ${track.title} (id=${songs[0].id})`);
       return songs[0].id;
     }
   } catch (e) {
-    songloft.log.warn(`创建远程歌曲失败: ${track.title} - ${String(e)}`);
+    logWarn(`创建远程歌曲失败: ${track.title} - ${String(e)}`);
   }
   return null;
 }
@@ -125,11 +126,11 @@ async function createSongWithSourceData(
     }]);
 
     if (songs && songs.length > 0 && songs[0].id) {
-      songloft.log.info(`已创建歌曲（内置音源）: ${track.title} (id=${songs[0].id})`);
+      logInfo(`已创建歌曲（内置音源）: ${track.title} (id=${songs[0].id})`);
       return songs[0].id;
     }
   } catch (e) {
-    songloft.log.warn(`创建歌曲失败（内置音源）: ${track.title} - ${String(e)}`);
+    logWarn(`创建歌曲失败（内置音源）: ${track.title} - ${String(e)}`);
   }
   return null;
 }
@@ -139,14 +140,18 @@ async function createSongWithSourceData(
 /**
  * 串流模式：获取串流 URL 并作为远程歌曲导入
  *
- * 优先使用自定义音源脚本或外部 API 解析直接 URL，
- * 如果都失败则回退到 sourceData 内置音源模式。
+ * 优先使用自定义音源脚本或外部 API 解析直接 URL。
+ * 如果配置了音源但解析失败，报告错误（不创建无法播放的歌曲）。
+ * 如果未配置任何音源，回退到 sourceData 内置音源模式。
  */
 async function streamTrack(
   config: PluginConfig,
   track: TrackInfo,
   progress: ImportProgress
 ): Promise<number | null> {
+  const hasCustomSource = (config.customSourceUrls || []).some(u => u.trim().length > 0);
+  const hasExternalApi = config.luoxueApiUrl && !config.useBuiltinSource;
+
   // 尝试解析直接 URL（自定义音源脚本 → 外部 API）
   const result = await resolveTrackUrl(config, track);
   if (result && result.url) {
@@ -159,8 +164,15 @@ async function streamTrack(
     return null;
   }
 
-  // 所有音源都无法解析直接 URL，回退到 sourceData
-  songloft.log.info(`回退到 sourceData 模式: ${track.title}`);
+  // 配置了音源但解析失败 → 报告错误，不创建无法播放的歌曲
+  if (hasCustomSource || hasExternalApi) {
+    logWarn(`音源解析失败，跳过: ${track.title}`);
+    progress.errors.push(`音源解析失败: ${track.title} - ${track.artist}`);
+    return null;
+  }
+
+  // 未配置任何音源，回退到 sourceData
+  logInfo(`无音源配置，使用 sourceData: ${track.title}`);
   const sourceData = await generateSourceData(track, config);
   if (!sourceData) {
     progress.errors.push(`无法匹配曲目: ${track.title} - ${track.artist}`);
@@ -181,15 +193,18 @@ async function streamTrack(
  * 下载模式：获取 URL，创建远程歌曲后下载到本地
  *
  * 优先使用自定义音源脚本或外部 API 解析直接 URL，然后下载到本地。
- * 如果所有音源都无法解析直接 URL，回退到 sourceData 模式：
- * 通过 sourceData 创建歌曲（无直接 URL），Songloft 下载时内部解析。
- * 下载失败时歌曲仍以串流形式保留在曲库中，不视为错误。
+ * 如果配置了音源但解析失败，报告错误（不创建无法播放的歌曲）。
+ * 如果未配置任何音源，回退到 sourceData 模式。
+ * 下载失败时歌曲仍以串流形式保留在曲库中。
  */
 async function downloadTrack(
   config: PluginConfig,
   track: TrackInfo,
   progress: ImportProgress
 ): Promise<number | null> {
+  const hasCustomSource = (config.customSourceUrls || []).some(u => u.trim().length > 0);
+  const hasExternalApi = config.luoxueApiUrl && !config.useBuiltinSource;
+
   let songId: number | null = null;
 
   // 尝试解析直接 URL（自定义音源脚本 → 外部 API）
@@ -198,9 +213,17 @@ async function downloadTrack(
     songId = await createRemoteSong(track, result.url);
   }
 
-  // 直接 URL 解析失败，回退到 sourceData
+  // 直接 URL 解析失败
   if (!songId) {
-    songloft.log.info(`回退到 sourceData 模式: ${track.title}`);
+    // 配置了音源但解析失败 → 报告错误，不创建无法播放的歌曲
+    if (hasCustomSource || hasExternalApi) {
+      logWarn(`音源解析失败，跳过: ${track.title}`);
+      progress.errors.push(`音源解析失败: ${track.title} - ${track.artist}`);
+      return null;
+    }
+
+    // 未配置任何音源，回退到 sourceData
+    logInfo(`无音源配置，使用 sourceData: ${track.title}`);
     const sourceData = await generateSourceData(track, config);
     if (!sourceData) {
       progress.errors.push(`无法匹配曲目: ${track.title} - ${track.artist}`);
@@ -220,13 +243,13 @@ async function downloadTrack(
   try {
     const downloadResult = await songloft.songs.download(songId);
     if (downloadResult.status === 'ok' || downloadResult.status === 'done') {
-      songloft.log.info(`已下载: ${track.title} → ${downloadResult.path}`);
+      logInfo(`已下载: ${track.title} → ${downloadResult.path}`);
       downloadSuccess = true;
     } else if (downloadResult.error) {
-      songloft.log.info(`下载未成功，已作为串流歌曲保留: ${track.title} - ${downloadResult.error}`);
+      logInfo(`下载未成功，已作为串流歌曲保留: ${track.title} - ${downloadResult.error}`);
     }
   } catch (e) {
-    songloft.log.info(`下载未成功，已作为串流歌曲保留: ${track.title} - ${String(e)}`);
+    logInfo(`下载未成功，已作为串流歌曲保留: ${track.title} - ${String(e)}`);
   }
 
   if (downloadSuccess) {
@@ -261,7 +284,7 @@ export async function importPlaylist(
 
   // 创建 Songloft 歌单
   const playlistName = `[导入] ${playlist.name}`;
-  songloft.log.info(`创建 Songloft 歌单: ${playlistName}`);
+  logInfo(`创建 Songloft 歌单: ${playlistName}`);
   let playlistId: number;
   try {
     playlistId = await createPlaylist(playlistName);
@@ -281,13 +304,13 @@ export async function importPlaylist(
     progress.currentTrack = `${track.title} - ${track.artist}`;
     progress.status = config.importMode === 'download' ? 'downloading' : 'importing';
 
-    songloft.log.info(`处理曲目 ${i + 1}/${playlist.tracks.length}: ${track.title}`);
+    logInfo(`处理曲目 ${i + 1}/${playlist.tracks.length}: ${track.title}`);
 
     try {
       // 步骤 1：先检查曲库中是否已有此歌曲
       const existingId = await findExistingSong(track);
       if (existingId) {
-        songloft.log.info(`曲库已有此歌曲: ${track.title} (id=${existingId})`);
+        logInfo(`曲库已有此歌曲: ${track.title} (id=${existingId})`);
         collectedSongIds.push(existingId);
         progress.importedSongs++;
       } else if (config.importMode === 'download') {
@@ -314,7 +337,7 @@ export async function importPlaylist(
         const batch = collectedSongIds.splice(0);
         await addSongsToPlaylist(playlistId, batch);
       } catch (e) {
-        songloft.log.warn(`批次加入歌单失败: ${String(e)}`);
+        logWarn(`批次加入歌单失败: ${String(e)}`);
       }
     }
 
@@ -340,6 +363,6 @@ export async function importPlaylist(
   }
   progress.message = msg;
 
-  songloft.log.info(progress.message);
+  logInfo(progress.message);
   return playlistId;
 }

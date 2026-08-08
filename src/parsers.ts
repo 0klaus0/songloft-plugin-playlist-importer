@@ -7,6 +7,7 @@
 /// <reference types="@songloft/plugin-sdk" />
 import { ParsedShareLink, Platform, PLATFORM_NAMES } from './types';
 import { extractUrls, fetchWithTimeout } from './utils';
+import { logInfo, logWarn, logError } from './logger';
 
 /** 各平台 URL 匹配规则 */
 interface MatchRule {
@@ -199,10 +200,10 @@ export async function parseShareLink(text: string): Promise<ParsedShareLink | nu
 
     // 步骤 3：如果是短链接，跟随重定向后再匹配
     if (isShortLink(url)) {
-      songloft.log.info(`解析短链接: ${url}`);
+      logInfo(`解析短链接: ${url}`);
       const resolvedUrl = await resolveShortLink(url);
       if (resolvedUrl !== url) {
-        songloft.log.info(`短链接重定向至: ${resolvedUrl}`);
+        logInfo(`短链接重定向至: ${resolvedUrl}`);
         result = matchUrl(resolvedUrl);
         if (result) {
           return {

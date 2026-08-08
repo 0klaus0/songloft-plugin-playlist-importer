@@ -14,6 +14,7 @@ import { PluginConfig, TrackInfo, LXSource, PLATFORM_TO_LX, SearchResult } from 
 import { fetchWithTimeout } from './utils';
 import { searchMusic as searchOnPlatform } from './fetchers';
 import { resolveUrlWithCustomSource } from './lx-source';
+import { logInfo, logWarn, logError } from './logger';
 
 /** 洛雪音源获取结果 */
 export interface LuoxueResult {
@@ -58,7 +59,7 @@ export async function getMusicUrl(
   quality: string
 ): Promise<string | null> {
   const url = buildApiUrl(config, source, songId, quality);
-  songloft.log.info(`洛雪音源请求: ${url}`);
+  logInfo(`洛雪音源请求: ${url}`);
 
   try {
     const resp = await fetchWithTimeout(url, {
@@ -67,7 +68,7 @@ export async function getMusicUrl(
     }, 15000);
 
     if (resp.status !== 200) {
-      songloft.log.warn(`洛雪音源回应状态码: ${resp.status}`);
+      logWarn(`洛雪音源回应状态码: ${resp.status}`);
       return null;
     }
 
@@ -98,7 +99,7 @@ export async function getMusicUrl(
     }
     // 格式3: { "code": 0, "data": "http://..." }
     if (data.code !== undefined && data.code !== 0) {
-      songloft.log.warn(`洛雪音源回应错误: code=${data.code}, msg=${data.msg || data.message || ''}`);
+      logWarn(`洛雪音源回应错误: code=${data.code}, msg=${data.msg || data.message || ''}`);
       return null;
     }
     // 格式4: { "link": "http://..." }
@@ -106,10 +107,10 @@ export async function getMusicUrl(
       return data.link as string;
     }
 
-    songloft.log.warn('洛雪音源回应中未找到有效的 URL');
+    logWarn('洛雪音源回应中未找到有效的 URL');
     return null;
   } catch (e) {
-    songloft.log.error(`洛雪音源请求失败: ${String(e)}`);
+    logError(`洛雪音源请求失败: ${String(e)}`);
     return null;
   }
 }
@@ -129,12 +130,12 @@ export async function crossPlatformMatch(
   targetSource: LXSource
 ): Promise<string | null> {
   const keyword = `${track.title} ${track.artist}`.trim();
-  songloft.log.info(`跨平台搜索: "${keyword}" on ${targetSource}`);
+  logInfo(`跨平台搜索: "${keyword}" on ${targetSource}`);
 
   try {
     const results: SearchResult[] = await searchOnPlatform(keyword, targetSource, 5);
     if (results.length === 0) {
-      songloft.log.warn(`跨平台搜索无结果: "${keyword}"`);
+      logWarn(`跨平台搜索无结果: "${keyword}"`);
       return null;
     }
 
@@ -147,17 +148,17 @@ export async function crossPlatformMatch(
         track.artist === '未知艺术家';
 
       if (titleMatch && artistMatch) {
-        songloft.log.info(`跨平台匹配成功: "${track.title}" → "${r.title}" (${r.songId})`);
+        logInfo(`跨平台匹配成功: "${track.title}" → "${r.title}" (${r.songId})`);
         return r.songId;
       }
     }
 
     // 如果没有精确匹配，取第一个结果（最相关）
     const first = results[0];
-    songloft.log.info(`跨平台模糊匹配: "${track.title}" → "${first.title}" (${first.songId})`);
+    logInfo(`跨平台模糊匹配: "${track.title}" → "${first.title}" (${first.songId})`);
     return first.songId;
   } catch (e) {
-    songloft.log.warn(`跨平台搜索失败: "${keyword}" - ${String(e)}`);
+    logWarn(`跨平台搜索失败: "${keyword}" - ${String(e)}`);
     return null;
   }
 }
@@ -189,7 +190,7 @@ export async function resolveTrackUrl(
 
   // 既没有自定义音源脚本，也没有外部 API，返回 null（使用 sourceData）
   if (customUrls.length === 0 && !hasExternalApi) {
-    songloft.log.info(`无可用音源，将使用 sourceData: ${track.title}`);
+    logInfo(`无可用音源，将使用 sourceData: ${track.title}`);
     return null;
   }
 
@@ -204,13 +205,13 @@ export async function resolveTrackUrl(
     // 平台有直接对应的洛雪来源
     source = trackSource;
     songId = track.platformSongId;
-    songloft.log.info(`直接音源映射: ${track.title} → ${source}/${songId}`);
+    logInfo(`直接音源映射: ${track.title} → ${source}/${songId}`);
   } else {
     // 平台无直接对应（如汽水音乐），跨平台搜索
-    songloft.log.info(`跨平台搜索匹配: ${track.title}`);
+    logInfo(`跨平台搜索匹配: ${track.title}`);
     const matchedId = await crossPlatformMatch(track, targetSource);
     if (!matchedId) {
-      songloft.log.warn(`无法匹配曲目: ${track.title} - ${track.artist}`);
+      logWarn(`无法匹配曲目: ${track.title} - ${track.artist}`);
       return null;
     }
     source = targetSource;
@@ -219,7 +220,7 @@ export async function resolveTrackUrl(
 
   // 优先级 1：自定义音源脚本
   if (customUrls.length > 0) {
-    songloft.log.info(`使用自定义音源脚本解析: ${source}/${songId}`);
+    logInfo(`使用自定义音源脚本解析: ${source}/${songId}`);
     const url = await resolveUrlWithCustomSource(customUrls, source, songId, config.defaultQuality);
     if (url) {
       return {
@@ -230,7 +231,7 @@ export async function resolveTrackUrl(
         matched: !trackSource || source !== trackSource,
       };
     }
-    songloft.log.warn(`自定义音源脚本解析失败，尝试外部 API`);
+    logWarn(`自定义音源脚本解析失败，尝试外部 API`);
   }
 
   // 优先级 2：外部洛雪 API
@@ -276,7 +277,7 @@ export async function resolveTrackUrl(
   }
 
   // 所有音源都失败，返回 null（调用方回退到 sourceData）
-  songloft.log.info(`所有音源解析失败，将使用 sourceData: ${track.title}`);
+  logInfo(`所有音源解析失败，将使用 sourceData: ${track.title}`);
   return null;
 }
 
@@ -306,15 +307,15 @@ export async function generateSourceData(
       title: track.title,
       artist: track.artist,
     };
-    songloft.log.info(`生成 sourceData: ${track.title} → ${trackSource}/${track.platformSongId}`);
+    logInfo(`生成 sourceData: ${track.title} → ${trackSource}/${track.platformSongId}`);
     return JSON.stringify(sourceData);
   }
 
   // 平台无直接对应（如汽水音乐），跨平台搜索匹配
-  songloft.log.info(`跨平台搜索生成 sourceData: ${track.title}`);
+  logInfo(`跨平台搜索生成 sourceData: ${track.title}`);
   const matchedId = await crossPlatformMatch(track, targetSource);
   if (!matchedId) {
-    songloft.log.warn(`无法匹配曲目: ${track.title} - ${track.artist}`);
+    logWarn(`无法匹配曲目: ${track.title} - ${track.artist}`);
     return null;
   }
 

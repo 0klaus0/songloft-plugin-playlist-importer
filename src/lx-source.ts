@@ -15,6 +15,7 @@
  * - 响应格式: Promise<string>（解析为音乐 URL）
  */
 /// <reference types="@songloft/plugin-sdk" />
+import { logInfo, logWarn, logError } from './logger';
 
 /** jsenv 环境名称 */
 const ENV_NAME = 'lxsource';
@@ -31,13 +32,116 @@ let supportedSources: string[] = [];
 /** 是否已初始化环境 */
 let envReady = false;
 
+/** 上次初始化错误信息 */
+let lastInitError: string = '';
+
 /**
  * lx 全局对象的初始化代码（注入到 jsenv 子环境中）
  *
  * 这段代码在子环境创建时执行，建立 LX 协议所需的 globalThis.lx 对象。
- * 如果 Songloft 已内置 lx 对象，则仅补充缺失的方法。
+ * 包含浏览器 API 兼容层（window, URLSearchParams, btoa/atob 等）。
  */
 const LX_INIT_CODE = `
+// ===== 浏览器兼容层 =====
+// LX 脚本通常在 Electron BrowserWindow 中运行，引用 window.lx
+if (typeof window === 'undefined') {
+  globalThis.window = globalThis;
+}
+if (typeof self === 'undefined') {
+  globalThis.self = globalThis;
+}
+
+// URLSearchParams polyfill（QuickJS 可能缺失）
+if (typeof URLSearchParams === 'undefined') {
+  globalThis.URLSearchParams = function(params) {
+    this._data = {};
+    if (typeof params === 'string') {
+      var s = params.charAt(0) === '?' ? params.substring(1) : params;
+      var pairs = s.split('&');
+      for (var i = 0; i < pairs.length; i++) {
+        var p = pairs[i].split('=');
+        if (p.length === 2) this._data[decodeURIComponent(p[0])] = decodeURIComponent(p[1]);
+      }
+    } else if (params && typeof params === 'object') {
+      for (var k in params) {
+        if (params.hasOwnProperty(k)) this._data[k] = String(params[k]);
+      }
+    }
+    this.append = function(k, v) { this._data[k] = String(v); };
+    this.get = function(k) { return this._data[k] || null; };
+    this.toString = function() {
+      var arr = [];
+      for (var k in this._data) {
+        if (this._data.hasOwnProperty(k)) arr.push(encodeURIComponent(k) + '=' + encodeURIComponent(this._data[k]));
+      }
+      return arr.join('&');
+    };
+  };
+}
+
+// btoa / atob polyfill
+if (typeof btoa === 'undefined') {
+  globalThis.btoa = function(str) {
+    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var output = '';
+    for (var i = 0; i < str.length; i += 3) {
+      var byte1 = str.charCodeAt(i) & 0xFF;
+      var byte2 = i + 1 < str.length ? str.charCodeAt(i + 1) & 0xFF : 0;
+      var byte3 = i + 2 < str.length ? str.charCodeAt(i + 2) & 0xFF : 0;
+      output += chars[byte1 >> 2];
+      output += chars[((byte1 & 3) << 4) | (byte2 >> 4)];
+      output += i + 1 < str.length ? chars[((byte2 & 15) << 2) | (byte3 >> 6)] : '=';
+      output += i + 2 < str.length ? chars[byte3 & 63] : '=';
+    }
+    return output;
+  };
+}
+if (typeof atob === 'undefined') {
+  globalThis.atob = function(str) {
+    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var output = '';
+    var str2 = str.replace(/=+$/, '');
+    for (var i = 0; i < str2.length; i += 4) {
+      var n1 = chars.indexOf(str2.charAt(i));
+      var n2 = chars.indexOf(str2.charAt(i + 1));
+      var n3 = chars.indexOf(str2.charAt(i + 2));
+      var n4 = chars.indexOf(str2.charAt(i + 3));
+      output += String.fromCharCode((n1 << 2) | (n2 >> 4));
+      if (n3 !== -1) output += String.fromCharCode(((n2 & 15) << 4) | (n3 >> 2));
+      if (n4 !== -1) output += String.fromCharCode(((n3 & 3) << 6) | n4);
+    }
+    return output;
+  };
+}
+
+// TextEncoder / TextDecoder polyfill（简易版）
+if (typeof TextEncoder === 'undefined') {
+  globalThis.TextEncoder = function() {
+    this.encode = function(str) {
+      var arr = [];
+      for (var i = 0; i < str.length; i++) {
+        var c = str.charCodeAt(i);
+        if (c < 128) arr.push(c);
+        else if (c < 2048) { arr.push(192 | (c >> 6)); arr.push(128 | (c & 63)); }
+        else { arr.push(224 | (c >> 12)); arr.push(128 | ((c >> 6) & 63)); arr.push(128 | (c & 63)); }
+      }
+      return new Uint8Array(arr);
+    };
+  };
+}
+if (typeof TextDecoder === 'undefined') {
+  globalThis.TextDecoder = function() {
+    this.decode = function(bytes) {
+      var str = '';
+      for (var i = 0; i < bytes.length; i++) {
+        str += String.fromCharCode(bytes[i]);
+      }
+      return str;
+    };
+  };
+}
+
+// ===== LX 协议接口 =====
 (function() {
   if (!globalThis.lx) {
     globalThis.lx = {};
@@ -51,146 +155,184 @@ const LX_INIT_CODE = `
 
   // 存储请求处理器
   globalThis.__lx_request_handler = null;
+  // 标记是否已初始化
+  globalThis.__lx_inited = false;
+  globalThis.__lx_inited_data = null;
 
   // lx.on: 注册事件监听器（脚本用于接收 request 事件）
-  if (!lx.on || lx._wrapped_on !== true) {
-    lx._wrapped_on = true;
-    lx.on = function(eventName, handler) {
-      if (eventName === 'request') {
-        globalThis.__lx_request_handler = handler;
-      }
-    };
-  }
+  lx.on = function(eventName, handler) {
+    if (eventName === 'request') {
+      globalThis.__lx_request_handler = handler;
+    }
+  };
 
   // lx.send: 发送事件（脚本用于 inited/updateAlert）
-  if (!lx.send) {
-    lx.send = function(eventName, data) {
-      if (typeof __go_send === 'function') {
-        __go_send(eventName, typeof data === 'string' ? data : JSON.stringify(data));
-      }
-    };
-  }
+  // __go_send 是 jsenv 子环境内置的全局函数，用于向父环境发送事件
+  lx.send = function(eventName, data) {
+    var dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+    if (eventName === 'inited') {
+      globalThis.__lx_inited = true;
+      globalThis.__lx_inited_data = dataStr;
+    }
+    if (typeof __go_send === 'function') {
+      __go_send(eventName, dataStr);
+    }
+  };
 
   // lx.request: HTTP 请求（回调风格，不受跨域限制）
-  if (!lx.request) {
-    lx.request = function(url, options, callback) {
-      var opts = options || {};
-      var fetchOpts = { method: opts.method || 'GET', headers: opts.headers || {} };
+  // LX 脚本使用此方法发起网络请求
+  lx.request = function(url, options, callback) {
+    var opts = options || {};
+    var method = (opts.method || 'GET').toUpperCase();
+    var headers = opts.headers || {};
+    var body = null;
 
-      if (opts.body) {
-        fetchOpts.body = opts.body;
-      }
-      if (opts.formData) {
-        var params = new URLSearchParams();
-        for (var k in opts.formData) {
-          if (opts.formData.hasOwnProperty(k)) params.append(k, String(opts.formData[k]));
+    if (opts.body) {
+      body = opts.body;
+    } else if (opts.formData) {
+      var parts = [];
+      for (var k in opts.formData) {
+        if (opts.formData.hasOwnProperty(k)) {
+          parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(opts.formData[k])));
         }
-        fetchOpts.body = params;
-        fetchOpts.headers['Content-Type'] = 'application/x-www-form-urlencoded';
       }
-      if (opts.json) {
-        fetchOpts.body = JSON.stringify(opts.json);
-        fetchOpts.headers['Content-Type'] = 'application/json';
+      body = parts.join('&');
+      headers['Content-Type'] = headers['Content-Type'] || 'application/x-www-form-urlencoded';
+    } else if (opts.json) {
+      body = JSON.stringify(opts.json);
+      headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+    } else if (opts.form) {
+      var parts2 = [];
+      for (var k2 in opts.form) {
+        if (opts.form.hasOwnProperty(k2)) {
+          parts2.push(encodeURIComponent(k2) + '=' + encodeURIComponent(String(opts.form[k2])));
+        }
       }
+      body = parts2.join('&');
+      headers['Content-Type'] = headers['Content-Type'] || 'application/x-www-form-urlencoded';
+    }
 
-      fetch(url, fetchOpts).then(function(resp) {
-        return resp.text().then(function(body) {
-          var headers = {};
-          if (resp.headers && typeof resp.headers.forEach === 'function') {
-            resp.headers.forEach(function(v, k) { headers[k] = v; });
+    var fetchOpts = { method: method, headers: headers };
+    if (body && method !== 'GET' && method !== 'HEAD') {
+      fetchOpts.body = body;
+    }
+
+    fetch(url, fetchOpts).then(function(resp) {
+      return resp.text().then(function(text) {
+        var respHeaders = {};
+        if (resp.headers && typeof resp.headers.forEach === 'function') {
+          resp.headers.forEach(function(v, k) { respHeaders[k] = v; });
+        }
+        // 尝试解析 JSON
+        var parsedBody = text;
+        try {
+          var ct = (respHeaders['content-type'] || respHeaders['Content-Type'] || '');
+          if (ct.indexOf('json') >= 0 || (text.charAt(0) === '{' || text.charAt(0) === '[')) {
+            parsedBody = JSON.parse(text);
           }
-          callback(null, { statusCode: resp.status, body: body, headers: headers }, body);
-        });
-      }).catch(function(err) {
-        callback(err, null, null);
+        } catch(e) { /* 保持 text */ }
+        callback(null, { statusCode: resp.status, status: resp.status, body: parsedBody, headers: respHeaders, raw: text }, parsedBody);
       });
-    };
-  }
+    }).catch(function(err) {
+      callback(err, null, null);
+    });
+  };
 
   // lx.utils: 工具方法
   if (!lx.utils) lx.utils = {};
 
-  if (!lx.utils.crypto) {
-    lx.utils.crypto = {
-      md5: function(s) {
-        try {
-          if (typeof crypto !== 'undefined' && crypto.createHash) {
-            return crypto.createHash('md5').update(s).digest('hex');
-          }
-          return '';
-        } catch(e) { return ''; }
-      },
-      sha256: function(s) {
-        try {
-          if (typeof crypto !== 'undefined' && crypto.createHash) {
-            return crypto.createHash('sha256').update(s).digest('hex');
-          }
-          return '';
-        } catch(e) { return ''; }
-      },
-      sha1: function(s) {
-        try {
-          if (typeof crypto !== 'undefined' && crypto.createHash) {
-            return crypto.createHash('sha1').update(s).digest('hex');
-          }
-          return '';
-        } catch(e) { return ''; }
-      },
-      randomBytes: function(n) {
-        try {
-          if (typeof crypto !== 'undefined' && crypto.randomBytes) {
-            return crypto.randomBytes(n);
-          }
-          return Buffer.alloc(n);
-        } catch(e) { return Buffer.alloc(n); }
-      },
-      aesEncrypt: function(data, mode, data2, key, iv) {
-        try {
-          if (typeof crypto !== 'undefined' && crypto.createCipheriv) {
-            var cipher = crypto.createCipheriv(mode, key, iv);
-            return Buffer.concat([cipher.update(data), cipher.final()]);
-          }
-          return null;
-        } catch(e) { return null; }
-      },
-      rsaEncrypt: function(data, key) {
-        try {
-          if (typeof crypto !== 'undefined' && crypto.publicEncrypt) {
-            return crypto.publicEncrypt(key, data);
-          }
-          return null;
-        } catch(e) { return null; }
-      },
-    };
-  }
+  lx.utils.crypto = lx.utils.crypto || {
+    md5: function(s) {
+      try {
+        if (typeof crypto !== 'undefined' && crypto.createHash) {
+          return crypto.createHash('md5').update(s).digest('hex');
+        }
+        if (typeof require === 'function') {
+          return require('crypto').createHash('md5').update(s).digest('hex');
+        }
+        return '';
+      } catch(e) { return ''; }
+    },
+    sha256: function(s) {
+      try {
+        if (typeof crypto !== 'undefined' && crypto.createHash) {
+          return crypto.createHash('sha256').update(s).digest('hex');
+        }
+        return '';
+      } catch(e) { return ''; }
+    },
+    sha1: function(s) {
+      try {
+        if (typeof crypto !== 'undefined' && crypto.createHash) {
+          return crypto.createHash('sha1').update(s).digest('hex');
+        }
+        return '';
+      } catch(e) { return ''; }
+    },
+    randomBytes: function(n) {
+      try {
+        if (typeof crypto !== 'undefined' && crypto.randomBytes) {
+          return crypto.randomBytes(n);
+        }
+        var arr = new Uint8Array(n);
+        for (var i = 0; i < n; i++) arr[i] = Math.floor(Math.random() * 256);
+        return Buffer.from(arr);
+      } catch(e) {
+        var arr2 = new Uint8Array(n);
+        for (var j = 0; j < n; j++) arr2[j] = Math.floor(Math.random() * 256);
+        return Buffer.from(arr2);
+      }
+    },
+    aesEncrypt: function(data, mode, data2, key, iv) {
+      try {
+        if (typeof crypto !== 'undefined' && crypto.createCipheriv) {
+          var cipher = crypto.createCipheriv(mode, key, iv);
+          return Buffer.concat([cipher.update(data), cipher.final()]);
+        }
+        return null;
+      } catch(e) { return null; }
+    },
+    rsaEncrypt: function(data, key) {
+      try {
+        if (typeof crypto !== 'undefined' && crypto.publicEncrypt) {
+          return crypto.publicEncrypt(key, data);
+        }
+        return null;
+      } catch(e) { return null; }
+    },
+  };
 
-  if (!lx.utils.buffer) {
-    lx.utils.buffer = {
-      from: function() { return Buffer.from.apply(Buffer, arguments); },
-      bufToString: function(buf, format) { return buf.toString(format); },
-    };
-  }
+  lx.utils.buffer = lx.utils.buffer || {
+    from: function() { return Buffer.from.apply(Buffer, arguments); },
+    bufToString: function(buf, format) { return buf.toString(format); },
+    alloc: function(n) { return Buffer.alloc(n); },
+  };
 
-  if (!lx.utils.zlib) {
-    lx.utils.zlib = {
-      gzip: function(data) {
-        try { return zlib.gzipSync(data); } catch(e) { return null; }
-      },
-      gunzip: function(data) {
-        try { return zlib.gunzipSync(data); } catch(e) { return null; }
-      },
-      deflate: function(data) {
-        try { return zlib.deflateSync(data); } catch(e) { return null; }
-      },
-      inflate: function(data) {
-        try { return zlib.inflateSync(data); } catch(e) { return null; }
-      },
-    };
-  }
+  lx.utils.zlib = lx.utils.zlib || {
+    gzip: function(data) {
+      try { return zlib.gzipSync(data); } catch(e) { return null; }
+    },
+    gunzip: function(data) {
+      try { return zlib.gunzipSync(data); } catch(e) { return null; }
+    },
+    deflate: function(data) {
+      try { return zlib.deflateSync(data); } catch(e) { return null; }
+    },
+    inflate: function(data) {
+      try { return zlib.inflateSync(data); } catch(e) { return null; }
+    },
+  };
 
-  // Promise 等待工具（供脚本内部使用）
-  if (!lx.Promise) {
-    lx.Promise = Promise;
+  lx.utils.log = lx.utils.log || function() {};
+
+  // Promise
+  lx.Promise = lx.Promise || Promise;
+
+  // HTTP 请求快捷方法（部分脚本可能直接使用 lx.utils.fetch）
+  if (!lx.utils.fetch) {
+    lx.utils.fetch = function(url, options) {
+      return fetch(url, options || {});
+    };
   }
 })();
 `;
@@ -204,7 +346,7 @@ async function downloadScript(url: string): Promise<string | null> {
     return scriptCache.get(url)!;
   }
 
-  songloft.log.info(`下载音源脚本: ${url}`);
+  logInfo(`下载音源脚本: ${url}`);
   try {
     const resp = await fetch(url, {
       method: 'GET',
@@ -212,21 +354,24 @@ async function downloadScript(url: string): Promise<string | null> {
     });
 
     if (!resp.ok) {
-      songloft.log.warn(`下载音源脚本失败: HTTP ${resp.status}`);
+      logWarn(`下载音源脚本失败: HTTP ${resp.status}`);
+      lastInitError = `下载失败: HTTP ${resp.status}`;
       return null;
     }
 
     const text = await resp.text();
     if (!text || text.length < 100) {
-      songloft.log.warn('音源脚本内容过短，可能无效');
+      logWarn('音源脚本内容过短，可能无效');
+      lastInitError = '脚本内容过短';
       return null;
     }
 
     scriptCache.set(url, text);
-    songloft.log.info(`音源脚本下载成功 (${text.length} 字节)`);
+    logInfo(`音源脚本下载成功 (${text.length} 字节)`);
     return text;
   } catch (e) {
-    songloft.log.error(`下载音源脚本异常: ${String(e)}`);
+    logError(`下载音源脚本异常: ${String(e)}`);
+    lastInitError = `下载异常: ${String(e)}`;
     return null;
   }
 }
@@ -262,53 +407,64 @@ async function initEnv(scriptUrl: string): Promise<boolean> {
     }
 
     // 创建新环境，注入 lx 初始化代码
-    songloft.log.info('创建 jsenv 子环境...');
+    logInfo('创建 jsenv 子环境...');
     await songloft.jsenv.create(ENV_NAME, LX_INIT_CODE);
 
     // 加载音源脚本并等待 inited 事件
-    songloft.log.info('加载音源脚本，等待初始化...');
+    logInfo('加载音源脚本，等待初始化...');
     const result = await songloft.jsenv.executeWait(
       ENV_NAME,
       scriptCode,
       30000,
-      ['inited']
+      ['inited', 'updateAlert']
     );
 
     if (result.error) {
-      songloft.log.error(`音源脚本执行错误: ${result.error}`);
+      logError(`音源脚本执行错误: ${result.error}`);
+      lastInitError = `脚本执行错误: ${result.error}`;
       return false;
     }
 
     // 解析 inited 事件，获取支持的来源
     const initedEvent = result.events.find(e => e.name === 'inited');
     if (!initedEvent) {
-      songloft.log.warn('音源脚本未发送 inited 事件');
+      logWarn('音源脚本未发送 inited 事件（可能初始化失败）');
+      lastInitError = '脚本未发送 inited 事件';
+      // 打印 result.result 帮助调试
+      logWarn(`脚本执行结果: ${(result.result || '').substring(0, 200)}`);
+      if (result.events.length > 0) {
+        logWarn(`收到的事件: ${result.events.map(e => e.name).join(', ')}`);
+      }
       return false;
     }
 
     try {
       const initedData = JSON.parse(initedEvent.data);
       if (initedData.status === false) {
-        songloft.log.error('音源脚本初始化失败');
+        logError('音源脚本初始化失败: status=false');
+        lastInitError = '脚本初始化失败 (status=false)';
         return false;
       }
       if (initedData.sources) {
         supportedSources = Object.keys(initedData.sources);
-        songloft.log.info(`音源脚本已初始化，支持来源: ${supportedSources.join(', ')}`);
+        logInfo(`音源脚本已初始化，支持来源: ${supportedSources.join(', ')}`);
       } else {
         supportedSources = ['kw', 'kg', 'tx', 'wy', 'mg'];
-        songloft.log.info('音源脚本已初始化（未声明来源，默认全部支持）');
+        logInfo('音源脚本已初始化（未声明来源，默认全部支持）');
       }
+      lastInitError = '';
     } catch {
       supportedSources = ['kw', 'kg', 'tx', 'wy', 'mg'];
-      songloft.log.info('音源脚本已初始化（来源解析失败，默认全部支持）');
+      logInfo('音源脚本已初始化（来源解析失败，默认全部支持）');
+      lastInitError = '';
     }
 
     envReady = true;
     loadedScriptUrl = scriptUrl;
     return true;
   } catch (e) {
-    songloft.log.error(`初始化音源环境失败: ${String(e)}`);
+    logError(`初始化音源环境失败: ${String(e)}`);
+    lastInitError = `初始化失败: ${String(e)}`;
     return false;
   }
 }
@@ -327,7 +483,7 @@ async function requestMusicUrl(
   quality: string
 ): Promise<string | null> {
   if (!envReady) {
-    songloft.log.warn('音源环境未初始化');
+    logWarn('音源环境未初始化');
     return null;
   }
 
@@ -338,7 +494,7 @@ async function requestMusicUrl(
 (function() {
   var handler = globalThis.__lx_request_handler;
   if (!handler) {
-    __go_send('musicUrl_error', JSON.stringify({ error: 'no request handler' }));
+    __go_send('musicUrl_error', JSON.stringify({ error: 'no request handler registered' }));
     return;
   }
   var req = {
@@ -380,7 +536,7 @@ async function requestMusicUrl(
     );
 
     if (result.error) {
-      songloft.log.warn(`音源请求执行错误: ${result.error}`);
+      logWarn(`音源请求执行错误: ${result.error}`);
       return null;
     }
 
@@ -389,24 +545,24 @@ async function requestMusicUrl(
     if (successEvent) {
       const data = JSON.parse(successEvent.data);
       if (data.url && data.url.startsWith('http')) {
-        songloft.log.info(`音源解析成功: ${source}/${songId} → ${data.url.substring(0, 80)}...`);
+        logInfo(`音源解析成功: ${source}/${songId} → ${data.url.substring(0, 80)}...`);
         return data.url;
       }
-      songloft.log.warn(`音源返回的 URL 无效: ${data.url}`);
+      logWarn(`音源返回的 URL 无效: ${data.url}`);
       return null;
     }
 
     const errorEvent = result.events.find(e => e.name === 'musicUrl_error');
     if (errorEvent) {
       const data = JSON.parse(errorEvent.data);
-      songloft.log.warn(`音源解析失败: ${source}/${songId} - ${data.error}`);
+      logWarn(`音源解析失败: ${source}/${songId} - ${data.error}`);
       return null;
     }
 
-    songloft.log.warn('音源请求超时，未收到响应');
+    logWarn('音源请求超时，未收到响应');
     return null;
   } catch (e) {
-    songloft.log.error(`音源请求异常: ${String(e)}`);
+    logError(`音源请求异常: ${String(e)}`);
     return null;
   }
 }
@@ -442,13 +598,13 @@ export async function resolveUrlWithCustomSource(
     // 初始化环境（如果尚未加载此脚本）
     const ok = await initEnv(scriptUrl);
     if (!ok) {
-      songloft.log.warn(`音源脚本初始化失败，尝试下一个: ${scriptUrl}`);
+      logWarn(`音源脚本初始化失败，尝试下一个: ${scriptUrl}`);
       continue;
     }
 
     // 检查脚本是否支持此来源
     if (supportedSources.length > 0 && !supportedSources.includes(source)) {
-      songloft.log.warn(`音源脚本不支持来源 ${source}，支持: ${supportedSources.join(',')}`);
+      logWarn(`音源脚本不支持来源 ${source}，支持: ${supportedSources.join(',')}`);
       continue;
     }
 
@@ -458,10 +614,17 @@ export async function resolveUrlWithCustomSource(
       return url;
     }
 
-    songloft.log.warn(`音源脚本 ${scriptUrl} 未能解析 URL，尝试下一个`);
+    logWarn(`音源脚本 ${scriptUrl} 未能解析 URL，尝试下一个`);
   }
 
   return null;
+}
+
+/**
+ * 获取上次初始化错误信息
+ */
+export function getLastError(): string {
+  return lastInitError;
 }
 
 /**
@@ -512,11 +675,12 @@ export async function testCustomSources(
         const sources = supportedSources.length > 0 ? supportedSources.join(',') : '全部';
         results.push(`#${i + 1} 正常 (${sources})`);
       } else {
-        results.push(`#${i + 1} 初始化失败`);
+        const err = lastInitError || '未知错误';
+        results.push(`#${i + 1} 失败 (${err.substring(0, 40)})`);
         allOk = false;
       }
     } catch (e) {
-      results.push(`#${i + 1} 异常: ${String(e)}`);
+      results.push(`#${i + 1} 异常: ${String(e).substring(0, 40)}`);
       allOk = false;
     }
   }

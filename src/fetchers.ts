@@ -6,6 +6,7 @@
 /// <reference types="@songloft/plugin-sdk" />
 import { PlaylistInfo, TrackInfo, Platform, LXSource, SearchResult } from './types';
 import { fetchWithTimeout, decodeHtmlEntities } from './utils';
+import { logInfo, logWarn, logError } from './logger';
 
 // ==================== 工具函数 ====================
 
@@ -529,7 +530,7 @@ export async function fetchQishuiPlaylist(shareId: string): Promise<PlaylistInfo
     ? shareId
     : `https://qishui.douyin.com/s/${shareId}/`;
 
-  songloft.log.info(`抓取汽水音乐分享: ${shareUrl}`);
+  logInfo(`抓取汽水音乐分享: ${shareUrl}`);
 
   const resp = await fetchWithTimeout(shareUrl, {
     method: 'GET',
@@ -695,9 +696,9 @@ export async function fetchPlaylist(platform: Platform, playlistId: string): Pro
   if (!fetcher) {
     throw new Error(`不支持的平台: ${platform}`);
   }
-  songloft.log.info(`开始抓取歌单: platform=${platform}, id=${playlistId}`);
+  logInfo(`开始抓取歌单: platform=${platform}, id=${playlistId}`);
   const playlist = await fetcher(playlistId);
-  songloft.log.info(`歌单抓取完成: ${playlist.name}, 共 ${playlist.tracks.length} 首`);
+  logInfo(`歌单抓取完成: ${playlist.name}, 共 ${playlist.tracks.length} 首`);
   return playlist;
 }
 

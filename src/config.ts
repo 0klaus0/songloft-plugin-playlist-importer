@@ -6,6 +6,7 @@
  */
 /// <reference types="@songloft/plugin-sdk" />
 import { PluginConfig, DEFAULT_CONFIG } from './types';
+import { logInfo, logWarn, logError } from './logger';
 
 const CONFIG_KEY = 'plugin_config';
 
@@ -19,7 +20,7 @@ export async function loadConfig(): Promise<PluginConfig> {
     const parsed = raw as Partial<PluginConfig>;
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch (e) {
-    songloft.log.warn('加载配置失败，使用默认值: ' + String(e));
+    logWarn('加载配置失败，使用默认值: ' + String(e));
     return { ...DEFAULT_CONFIG };
   }
 }
@@ -29,7 +30,7 @@ export async function loadConfig(): Promise<PluginConfig> {
  */
 export async function saveConfig(config: PluginConfig): Promise<void> {
   await songloft.storage.set(CONFIG_KEY, config);
-  songloft.log.info('配置已保存');
+  logInfo('配置已保存');
 }
 
 /**

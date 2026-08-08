@@ -457,6 +457,76 @@
       flex-shrink: 0;
     }
 
+    /* ==================== Log Viewer ==================== */
+    .log-container {
+      max-height: 480px;
+      overflow-y: auto;
+      background: var(--bg-input);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius);
+      padding: 10px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .log-empty {
+      color: var(--text-muted);
+      text-align: center;
+      padding: 24px 0;
+      font-family: var(--font-sans);
+      font-size: var(--font-size-sm);
+    }
+    .log-line {
+      display: flex;
+      gap: 8px;
+      padding: 2px 0;
+      word-break: break-all;
+      border-bottom: 1px solid rgba(255,255,255,0.02);
+    }
+    .log-line:last-child {
+      border-bottom: none;
+    }
+    .log-time {
+      color: var(--text-muted);
+      flex-shrink: 0;
+      font-size: 11px;
+    }
+    .log-level {
+      flex-shrink: 0;
+      width: 36px;
+      text-align: center;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      line-height: 16px;
+      height: 16px;
+      margin-top: 1px;
+    }
+    .log-level-info {
+      background: var(--cyan-soft);
+      color: var(--cyan);
+    }
+    .log-level-warn {
+      background: rgba(251, 191, 36, 0.12);
+      color: var(--warning);
+    }
+    .log-level-error {
+      background: var(--error-soft);
+      color: var(--error);
+    }
+    .log-msg {
+      color: var(--text-secondary);
+      flex: 1;
+      min-width: 0;
+    }
+    .log-msg-error {
+      color: var(--error);
+    }
+    .log-msg-warn {
+      color: var(--warning);
+    }
+
     /* ==================== Progress ==================== */
     .progress-bar-container {
       width: 100%;
@@ -825,6 +895,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         <span>设置</span>
       </button>
+      <button class="tab-btn" data-tab="logs" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+        <span>日志</span>
+      </button>
     </nav>
 
     <!-- 导入歌单 -->
@@ -1011,6 +1085,35 @@
           <span class="card-title">支持的平台</span>
         </div>
         <div id="platform-list" class="platform-list"></div>
+      </div>
+    </section>
+
+    <!-- 日志 -->
+    <section id="tab-logs" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+          </span>
+          <span class="card-title">运行日志</span>
+        </div>
+        <div class="button-row" style="margin-top:0;margin-bottom:14px">
+          <button id="btn-refresh-logs" class="btn btn-secondary" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+            <span>刷新</span>
+          </button>
+          <button id="btn-clear-logs" class="btn btn-secondary" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+            <span>清空</span>
+          </button>
+          <button id="btn-toggle-auto" class="btn btn-secondary" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            <span>自动刷新</span>
+          </button>
+        </div>
+        <div id="log-container" class="log-container">
+          <div class="log-empty">暂无日志</div>
+        </div>
       </div>
     </section>
   </div>
@@ -1495,6 +1598,79 @@
     // ==================== 初始化 ====================
     loadConfig();
     loadPlatforms();
+
+    // ==================== 日志查看 ====================
+    var logAutoRefresh = false;
+    var logRefreshTimer = null;
+
+    function formatLogTime(ts) {
+      var d = new Date(ts);
+      var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+      return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    }
+
+    function loadLogs() {
+      api('/logs?limit=500', 'GET').then(function (res) {
+        var container = $('log-container');
+        if (!container) return;
+        if (!res || !res.success || !res.logs || res.logs.length === 0) {
+          container.innerHTML = '<div class="log-empty">暂无日志</div>';
+          return;
+        }
+        var html = '';
+        for (var i = 0; i < res.logs.length; i++) {
+          var log = res.logs[i];
+          var levelClass = 'log-level-' + (log.level || 'info');
+          var msgClass = 'log-msg' + (log.level === 'error' ? ' log-msg-error' : (log.level === 'warn' ? ' log-msg-warn' : ''));
+          html += '<div class="log-line">' +
+            '<span class="log-time">' + escapeHtml(formatLogTime(log.ts)) + '</span>' +
+            '<span class="log-level ' + levelClass + '">' + escapeHtml(log.level || 'info') + '</span>' +
+            '<span class="' + msgClass + '">' + escapeHtml(log.msg) + '</span>' +
+            '</div>';
+        }
+        container.innerHTML = html;
+        container.scrollTop = container.scrollHeight;
+      }).catch(function () {
+        // 忽略
+      });
+    }
+
+    function clearLogs() {
+      api('/logs/clear', 'POST', {}).then(function () {
+        loadLogs();
+        showToast('日志已清空');
+      }).catch(function () {
+        showToast('清空失败', 'error');
+      });
+    }
+
+    function toggleAutoRefresh() {
+      logAutoRefresh = !logAutoRefresh;
+      var btn = $('btn-toggle-auto');
+      if (logAutoRefresh) {
+        btn.classList.remove('btn-secondary');
+        btn.classList.add('btn-primary');
+        logRefreshTimer = setInterval(loadLogs, 3000);
+        loadLogs();
+      } else {
+        btn.classList.add('btn-secondary');
+        btn.classList.remove('btn-primary');
+        if (logRefreshTimer) {
+          clearInterval(logRefreshTimer);
+          logRefreshTimer = null;
+        }
+      }
+    }
+
+    if ($('btn-refresh-logs')) {
+      $('btn-refresh-logs').addEventListener('click', loadLogs);
+    }
+    if ($('btn-clear-logs')) {
+      $('btn-clear-logs').addEventListener('click', clearLogs);
+    }
+    if ($('btn-toggle-auto')) {
+      $('btn-toggle-auto').addEventListener('click', toggleAutoRefresh);
+    }
   })();
   </script>
 </body>
