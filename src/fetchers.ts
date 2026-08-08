@@ -532,31 +532,54 @@ export async function fetchQishuiPlaylist(shareId: string): Promise<PlaylistInfo
 
   logInfo(`抓取汽水音乐分享: ${shareUrl}`);
 
-  const resp = await fetchWithTimeout(shareUrl, {
-    method: 'GET',
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'zh-CN,zh;q=0.9',
-    },
-  }, 15000);
+  let resp;
+  try {
+    resp = await fetchWithTimeout(shareUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+      },
+    }, 20000);
+  } catch (e) {
+    logError(`汽水音乐页面请求异常: ${String(e)}`);
+    throw new Error(`汽水音乐页面请求失败: ${String(e)}`);
+  }
+
+  logInfo(`汽水音乐页面响应: status=${resp.status}, body长度=${resp.body ? resp.body.length : 0}`);
 
   if (resp.status !== 200) {
     throw new Error(`汽水音乐页面请求失败: HTTP ${resp.status}`);
   }
 
   const html = resp.body;
+  if (!html || html.trim() === '') {
+    logError('汽水音乐页面响应体为空');
+    throw new Error('汽水音乐页面响应体为空，可能是网络问题或被重定向');
+  }
+
+  // 检查是否包含 _ROUTER_DATA
+  if (html.indexOf('_ROUTER_DATA') === -1) {
+    logWarn(`页面中未找到 _ROUTER_DATA，HTML 前500字符: ${html.substring(0, 500)}`);
+    throw new Error('汽水音乐页面结构已变更或链接已失效');
+  }
 
   // 提取 _ROUTER_DATA
   const routerData = extractRouterData(html);
   if (!routerData) {
+    logError('无法从页面提取 _ROUTER_DATA JSON');
     throw new Error('无法从汽水音乐页面提取数据，可能是链接已失效或页面结构已变更');
   }
+  logInfo('成功提取 _ROUTER_DATA');
 
   // 查找所有音频数据
   const audioDataList = findAllAudioData(routerData);
 
+  logInfo(`汽水音乐找到 ${audioDataList.length} 首曲目`);
+
   if (audioDataList.length === 0) {
+    logError('汽水音乐分享中未找到曲目信息');
     throw new Error('汽水音乐分享中未找到曲目信息');
   }
 

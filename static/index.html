@@ -1137,7 +1137,18 @@
         headers: { 'Content-Type': 'application/json' },
       };
       if (body !== undefined) opts.body = JSON.stringify(body);
-      return fetch(API_BASE + path, opts).then(function (r) { return r.json(); });
+      return fetch(API_BASE + path, opts).then(function (r) {
+        return r.text().then(function (text) {
+          if (!text || text.trim() === '') {
+            throw new Error('服务器返回空响应（可能请求超时或内部错误）');
+          }
+          try {
+            return JSON.parse(text);
+          } catch (e) {
+            throw new Error('服务器返回了无效的 JSON: ' + text.substring(0, 200));
+          }
+        });
+      });
     }
 
     function $(id) { return document.getElementById(id); }

@@ -116,15 +116,22 @@ router.post('/api/preview', async (req) => {
     return errorResponse('请输入分享链接或文字');
   }
 
+  logInfo(`预览请求: ${body.text.substring(0, 100)}`);
+
   // 步骤 1：解析链接
   const parsed = await parseShareLink(body.text);
   if (!parsed) {
+    logWarn('无法识别分享链接');
     return errorResponse('无法识别此分享链接');
   }
 
+  logInfo(`解析成功: platform=${parsed.platform}, id=${parsed.playlistId}`);
+
   // 步骤 2：抓取歌单
   try {
+    logInfo('开始抓取歌单...');
     const playlist = await fetchPlaylist(parsed.platform, parsed.playlistId);
+    logInfo(`抓取完成: ${playlist.name}, ${playlist.tracks.length} 首`);
     // 回传歌单信息（不包含完整曲目列表，避免回应过大）
     const preview = {
       platform: playlist.platform,
@@ -142,6 +149,7 @@ router.post('/api/preview', async (req) => {
     };
     return jsonResponse({ success: true, parsed, playlist: preview });
   } catch (e) {
+    logError(`抓取歌单失败: ${String(e)}`);
     return errorResponse(`抓取歌单失败: ${String(e)}`);
   }
 });
