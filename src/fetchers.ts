@@ -18,6 +18,38 @@ function joinArtists(artists: { name?: string }[] | undefined): string {
   return artists.map((a) => a.name || '').filter(Boolean).join('、') || '未知艺术家';
 }
 
+/**
+ * 安全解析 JSON，失败时返回 null 而不是抛出。
+ *
+ * 修复：并发搜索时各音乐平台可能因限流/反爬返回 HTML、纯文本或截断 JSON，
+ *       原来直接 JSON.parse(resp.body) 会抛 SyntaxError，导致整批解析失败。
+ *       改为：
+ *       1. 先用 trim() + 首字符快速判断
+ *       2. 失败时尝试 JSON5 式宽松解析（容许末尾多余逗号）
+ *       3. 解析失败返回 null，由调用方记录错误而不崩溃整个流程
+ */
+function safeJsonParse(text: string): Record<string, unknown> | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  // 快速判断：JSON 必须以 { 或 [ 开头，否则多半是错误页（HTML/纯文本）
+  const first = trimmed[0];
+  if (first !== '{' && first !== '[') {
+    return null;
+  }
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    // 容许末尾多余逗号（部分平台接口偶发返回非法 JSON）
+    try {
+      const fixed = trimmed.replace(/,\s*([}\]])/g, '$1');
+      return JSON.parse(fixed) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+}
+
 // ==================== 网易云音乐 ====================
 
 /**
@@ -38,8 +70,8 @@ export async function fetchNeteasePlaylist(playlistId: string): Promise<Playlist
     throw new Error(`网易云 API 回应状态码: ${resp.status}`);
   }
 
-  const data = JSON.parse(resp.body);
-  if (data.code !== 200 || !data.playlist) {
+  const data = safeJsonParse(resp.body);
+  if (!data || data.code !== 200 || !data.playlist) {
     throw new Error('网易云歌单数据格式异常或歌单不存在');
   }
 
@@ -66,6 +98,8 @@ export async function fetchNeteasePlaylist(playlistId: string): Promise<Playlist
 
 /**
  * 搜索网易云音乐
+ *
+ * 修复：使用 safeJsonParse 防止平台返回 HTML/错误页时抛 SyntaxError
  */
 export async function searchNetease(keyword: string, limit = 10): Promise<SearchResult[]> {
   const url = `https://music.163.com/api/search/get?s=${encodeURIComponent(keyword)}&type=1&limit=${limit}&offset=0`;
@@ -78,10 +112,11 @@ export async function searchNetease(keyword: string, limit = 10): Promise<Search
     },
   }, 10000);
 
-  const data = JSON.parse(resp.body);
-  if (!data.result || !data.result.songs) return [];
+  const data = safeJsonParse(resp.body);
+  if (!data || !data.result || !(data.result as Record<string, unknown>).songs) return [];
 
-  return (data.result.songs as Record<string, unknown>[]).map((s) => ({
+  const songs = (data.result as Record<string, unknown>).songs as Record<string, unknown>[];
+  return songs.map((s) => ({
     songId: String(s.id),
     title: decodeHtmlEntities(s.name as string || ''),
     artist: joinArtists(s.artists as { name?: string }[] | undefined),
@@ -118,13 +153,13 @@ export async function fetchQQMusicPlaylist(playlistId: string): Promise<Playlist
     body = body.slice(1, -1);
   }
 
-  const data = JSON.parse(body);
-  if (!data.cdlist || !data.cdlist[0]) {
+  const data = safeJsonParse(body);
+  if (!data || !data.cdlist || !(data.cdlist as unknown[])[0]) {
     throw new Error('QQ音乐歌单数据格式异常或歌单不存在');
   }
 
-  const cdlist = data.cdlist[0];
-  const tracks: TrackInfo[] = (cdlist.songlist || []).map((s: Record<string, unknown>) => ({
+  const cdlist = (data.cdlist as Record<string, unknown>[])[0];
+  const tracks: TrackInfo[] = ((cdlist.songlist as Record<string, unknown>[]) || []).map((s) => ({
     title: decodeHtmlEntities(s.songname as string || s.name as string || ''),
     artist: joinArtists(s.singer as { name?: string }[] | undefined),
     album: s.albumname as string || '',
@@ -146,6 +181,8 @@ export async function fetchQQMusicPlaylist(playlistId: string): Promise<Playlist
 
 /**
  * 搜索QQ音乐
+ *
+ * 修复：使用 safeJsonParse 防止平台返回非 JSON 时抛 SyntaxError
  */
 export async function searchQQMusic(keyword: string, limit = 10): Promise<SearchResult[]> {
   const url = `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=${encodeURIComponent(keyword)}&format=json&n=${limit}&p=1&cr=1&g_tk=5381`;
@@ -162,10 +199,12 @@ export async function searchQQMusic(keyword: string, limit = 10): Promise<Search
     body = body.slice(9, -1);
   }
 
-  const data = JSON.parse(body);
-  if (!data.data || !data.data.song || !data.data.song.list) return [];
+  const data = safeJsonParse(body);
+  if (!data || !data.data || !(data.data as Record<string, unknown>).song) return [];
+  const songData = (data.data as Record<string, unknown>).song as Record<string, unknown>;
+  if (!songData.list) return [];
 
-  return (data.data.song.list as Record<string, unknown>[]).map((s) => ({
+  return ((songData.list as Record<string, unknown>[]) || []).map((s) => ({
     songId: s.songmid as string || '',
     title: decodeHtmlEntities(s.songname as string || ''),
     artist: joinArtists(s.singer as { name?: string }[] | undefined),
@@ -196,12 +235,12 @@ export async function fetchKuwoPlaylist(playlistId: string): Promise<PlaylistInf
     throw new Error(`酷我 API 回应状态码: ${resp.status}`);
   }
 
-  const data = JSON.parse(resp.body);
-  if (!data.musiclist || data.musiclist.length === 0) {
+  const data = safeJsonParse(resp.body);
+  if (!data || !data.musiclist || (data.musiclist as unknown[]).length === 0) {
     throw new Error('酷我歌单数据格式异常或歌单不存在');
   }
 
-  const tracks: TrackInfo[] = (data.musiclist as Record<string, unknown>[]).map((m) => ({
+  const tracks: TrackInfo[] = ((data.musiclist as Record<string, unknown>[]) || []).map((m) => ({
     title: decodeHtmlEntities(m.name as string || ''),
     artist: decodeHtmlEntities(m.artist as string || '未知艺术家'),
     album: m.album as string || '',
@@ -223,6 +262,10 @@ export async function fetchKuwoPlaylist(playlistId: string): Promise<PlaylistInf
 
 /**
  * 搜索酷我音乐
+ *
+ * 修复：使用 safeJsonParse 防止 SyntaxError；
+ *       并发批量搜索酷我时易触发限流，返回 HTML/纯文本，
+ *       原来 JSON.parse 直抛导致整批搜索失败。
  */
 export async function searchKuwo(keyword: string, limit = 10): Promise<SearchResult[]> {
   const url = `http://search.kuwo.cn/r.s?all=${encodeURIComponent(keyword)}&ft=music&rn=${limit}&pn=0&encoding=utf8&rformat=json&vipver=1&pcmp4=1`;
@@ -234,10 +277,10 @@ export async function searchKuwo(keyword: string, limit = 10): Promise<SearchRes
     },
   }, 10000);
 
-  const data = JSON.parse(resp.body);
-  if (!data.abslist || data.abslist.length === 0) return [];
+  const data = safeJsonParse(resp.body);
+  if (!data || !data.abslist || (data.abslist as unknown[]).length === 0) return [];
 
-  return (data.abslist as Record<string, unknown>[]).map((s) => ({
+  return ((data.abslist as Record<string, unknown>[]) || []).map((s) => ({
     songId: String(s.MUSICRID || '').replace('MUSIC_', ''),
     title: decodeHtmlEntities(s.SONGNAME as string || ''),
     artist: decodeHtmlEntities(s.ARTIST as string || '未知艺术家'),
@@ -264,11 +307,12 @@ export async function fetchKugouPlaylist(playlistId: string): Promise<PlaylistIn
   let creator = '';
 
   try {
-    const infoData = JSON.parse(infoResp.body);
-    if (infoData.status === 1 && infoData.data) {
-      playlistName = decodeHtmlEntities(infoData.data.specialname || '未知歌单');
-      coverUrl = infoData.data.imgurl || '';
-      creator = infoData.data.nickname || '';
+    const infoData = safeJsonParse(infoResp.body);
+    if (infoData && infoData.status === 1 && infoData.data) {
+      const idata = infoData.data as Record<string, unknown>;
+      playlistName = decodeHtmlEntities((idata.specialname as string) || '未知歌单');
+      coverUrl = (idata.imgurl as string) || '';
+      creator = (idata.nickname as string) || '';
     }
   } catch { /* 忽略 */ }
 
@@ -282,12 +326,12 @@ export async function fetchKugouPlaylist(playlistId: string): Promise<PlaylistIn
     throw new Error(`酷狗 API 回应状态码: ${songsResp.status}`);
   }
 
-  const songsData = JSON.parse(songsResp.body);
-  if (!songsData.data || !songsData.data.info) {
+  const songsData = safeJsonParse(songsResp.body);
+  if (!songsData || !songsData.data || !(songsData.data as Record<string, unknown>).info) {
     throw new Error('酷狗歌单数据格式异常或歌单不存在');
   }
 
-  const tracks: TrackInfo[] = (songsData.data.info as Record<string, unknown>[]).map((s) => ({
+  const tracks: TrackInfo[] = (((songsData.data as Record<string, unknown>).info as Record<string, unknown>[]) || []).map((s) => ({
     title: decodeHtmlEntities(s.filename as string || s.name as string || ''),
     artist: decodeHtmlEntities(s.singername as string || '未知艺术家'),
     album: s.album_name as string || '',
@@ -309,6 +353,8 @@ export async function fetchKugouPlaylist(playlistId: string): Promise<PlaylistIn
 
 /**
  * 搜索酷狗音乐
+ *
+ * 修复：使用 safeJsonParse 防止 SyntaxError
  */
 export async function searchKugou(keyword: string, limit = 10): Promise<SearchResult[]> {
   const url = `http://mobilecdn.kugou.com/api/v3/search/song?keyword=${encodeURIComponent(keyword)}&pagesize=${limit}&page=1&version=9108`;
@@ -317,10 +363,11 @@ export async function searchKugou(keyword: string, limit = 10): Promise<SearchRe
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
   }, 10000);
 
-  const data = JSON.parse(resp.body);
-  if (!data.data || !data.data.info) return [];
+  const data = safeJsonParse(resp.body);
+  if (!data || !data.data || !(data.data as Record<string, unknown>).info) return [];
+  const infoData = (data.data as Record<string, unknown>).info as Record<string, unknown>[];
 
-  return (data.data.info as Record<string, unknown>[]).map((s) => ({
+  return infoData.map((s) => ({
     songId: String(s.audio_id || s.id || ''),
     title: decodeHtmlEntities(s.songname as string || ''),
     artist: decodeHtmlEntities(s.singername as string || '未知艺术家'),
@@ -727,6 +774,9 @@ export async function fetchPlaylist(platform: Platform, playlistId: string): Pro
 
 /**
  * 搜索歌曲（统一入口）
+ *
+ * 修复：捕获单个平台搜索失败，确保一个平台出错不影响其他平台（阶段 1 顺序处理时），
+ *       并发搜索时也避免一个错误导致整组 Promise.all reject。
  */
 export async function searchMusic(
   keyword: string,
@@ -735,7 +785,13 @@ export async function searchMusic(
 ): Promise<SearchResult[]> {
   const searcher = SEARCH_FUNCTIONS[source];
   if (!searcher) {
-    throw new Error(`不支持的搜索来源: ${source}`);
+    logWarn(`不支持的搜索来源: ${source}`);
+    return [];
   }
-  return searcher(keyword, limit);
+  try {
+    return await searcher(keyword, limit);
+  } catch (e) {
+    logWarn(`搜索异常: ${source} "${keyword}" - ${String(e)}`);
+    return [];
+  }
 }

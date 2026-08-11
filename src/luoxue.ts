@@ -45,6 +45,24 @@ function buildApiUrl(config: PluginConfig, source: LXSource, songId: string, qua
 }
 
 /**
+ * 安全解析 JSON：返回 Record 或 null，避免因 HTML/纯文本/截断 JSON 触发 SyntaxError。
+ */
+function safeJsonParse(text: string): Record<string, unknown> | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const first = trimmed[0];
+  if (first !== '{' && first !== '[') {
+    return null;
+  }
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 通过洛雪音源 API 获取音乐下载链接
  *
  * @param config 插件配置
@@ -73,13 +91,12 @@ export async function getMusicUrl(
     }
 
     // 尝试解析 JSON 回应
-    let data: Record<string, unknown>;
-    try {
-      data = JSON.parse(resp.body);
-    } catch {
-      // 如果不是 JSON，可能直接是 URL
+    const data = safeJsonParse(resp.body);
+    if (!data) {
+      // 不是 JSON，可能直接是 URL
       const trimmed = resp.body.trim();
       if (trimmed.startsWith('http')) return trimmed;
+      logWarn(`洛雪音源回应非 JSON: ${trimmed.substring(0, 100)}`);
       return null;
     }
 
@@ -134,7 +151,7 @@ export async function crossPlatformMatch(
 
   try {
     const results: SearchResult[] = await searchOnPlatform(keyword, targetSource, 5);
-    if (results.length === 0) {
+    if (!results || results.length === 0) {
       logWarn(`跨平台搜索无结果: "${keyword}"`);
       return null;
     }
@@ -158,6 +175,8 @@ export async function crossPlatformMatch(
     logInfo(`跨平台模糊匹配: "${track.title}" → "${first.title}" (${first.songId})`);
     return first.songId;
   } catch (e) {
+    // 修复：抛出在阶段 1 顺序处理时被外层 try/catch 捕获，
+    //       不让一个搜索失败阻断整批歌单导入
     logWarn(`跨平台搜索失败: "${keyword}" - ${String(e)}`);
     return null;
   }
@@ -332,9 +351,6 @@ export async function generateSourceData(
 
 /**
  * 测试音源连通性
- *
- * 优先测试自定义音源脚本（通过 jsenv 实际加载并初始化），
- * 其次测试外部洛雪 API 服务器连通性。
  */
 export async function testLuoxueServer(config: PluginConfig): Promise<{ ok: boolean; message: string }> {
   const customUrls = (config.customSourceUrls || [])

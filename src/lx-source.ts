@@ -13,6 +13,13 @@
  * - 脚本通过 lx.send('inited', { sources }) 声明初始化完成
  * - 请求格式: { source, action: 'musicUrl', info: { type, musicInfo: { songmid } } }
  * - 响应格式: Promise<string>（解析为音乐 URL）
+ *
+ * ★ 并发安全：
+ *   songloft.jsenv 子环境是**单事件流**的（events 列表按发生顺序追加）。
+ *   原实现中阶段 2 并发调用 executeWait 时，3 个 promise 同时进入同一环境，
+ *   会导致 musicUrl_result 事件互相错台（A 拿到 B 的事件，或超时）。
+ *   修复：对 requestMusicUrl 增加**互斥锁（mutex）**，强制串行执行；
+ *   initEnv 也加同一把锁，避免 envReady 标志位与 executeWait 不一致。
  */
 /// <reference types="@songloft/plugin-sdk" />
 import { logInfo, logWarn, logError } from './logger';
@@ -34,6 +41,36 @@ let envReady = false;
 
 /** 上次初始化错误信息 */
 let lastInitError: string = '';
+
+/**
+ * ★ 互斥锁：串行化所有 jsenv 操作
+ *
+ * 修复前：阶段 2 用 Promise.all(batch.map(requestMusicUrl))，3 个并发请求
+ *        同时进入 executeWait 同一子环境，由于 jsenv 执行器的事件流无法区分
+ *        调用者，会导致 musicUrl_result / musicUrl_error 互相错台、回调函数
+ *        拿到别人家的结果（这才是 SyntaxError 的间接源头：请求方拿到错误的
+ *        字符串后 JSON.parse 报错）。
+ *
+ * 修复后：所有 jsenv 操作（包括 initEnv 和 requestMusicUrl）共享一个
+ *        promise 链式的 mutex 锁，确保同一时刻只有一个请求在子环境中活跃。
+ */
+let mutexChain: Promise<void> = Promise.resolve();
+
+/**
+ * 包裹一个异步操作进入互斥队列，确保串行执行。
+ *
+ * @param op 要串行执行的异步操作
+ * @returns op 的返回值
+ */
+function withMutex<T>(op: () => Promise<T>): Promise<T> {
+  const next = mutexChain.then(op, op);
+  // 用 catch 防止任意一个操作抛错后阻塞后续操作
+  mutexChain = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
 
 /**
  * lx 全局对象的初始化代码（注入到 jsenv 子环境中）
@@ -446,115 +483,113 @@ async function downloadScript(url: string): Promise<string | null> {
 /**
  * 初始化 jsenv 环境并加载音源脚本
  *
- * 优化：环境创建后持久复用，不会每首歌都重新创建。
- * 如果 executeWait 导致环境失效，requestMusicUrl 会标记 envReady=false，
- * 下次调用 initEnv 时自动重建。
- *
- * @param scriptUrl 音源脚本 URL
- * @returns 是否成功初始化
+ * 修复：包入互斥锁，确保和其他 jsenv 操作串行，
+ *       避免 envReady 标志位在并发情况下被中途改写。
  */
 async function initEnv(scriptUrl: string): Promise<boolean> {
-  // 如果已经加载了同一个脚本，直接返回
-  if (envReady && loadedScriptUrl === scriptUrl) {
-    logInfo(`音源环境已就绪，复用现有环境: ${scriptUrl.substring(0, 60)}...`);
-    return true;
-  }
-
-  logInfo(`initEnv: envReady=${envReady}, loadedScriptUrl=${loadedScriptUrl ? loadedScriptUrl.substring(0, 40) : 'null'}, scriptUrl=${scriptUrl.substring(0, 40)}...`);
-
-  // 下载脚本（有缓存，不会重复下载）
-  const scriptCode = await downloadScript(scriptUrl);
-  if (!scriptCode) {
-    return false;
-  }
-
-  try {
-    // 销毁旧环境（无论 envReady 状态，都先尝试销毁，避免 "already exists" 错误）
-    try {
-      await songloft.jsenv.destroy(ENV_NAME);
-    } catch {
-      // 环境不存在时忽略错误
+  return withMutex(async () => {
+    // 如果已经加载了同一个脚本，直接返回
+    if (envReady && loadedScriptUrl === scriptUrl) {
+      logInfo(`音源环境已就绪，复用现有环境: ${scriptUrl.substring(0, 60)}...`);
+      return true;
     }
-    envReady = false;
-    loadedScriptUrl = null;
 
-    // 创建新环境，注入 lx 初始化代码
-    logInfo('创建 jsenv 子环境...');
-    await songloft.jsenv.create(ENV_NAME, LX_INIT_CODE);
+    logInfo(`initEnv: envReady=${envReady}, loadedScriptUrl=${loadedScriptUrl ? loadedScriptUrl.substring(0, 40) : 'null'}, scriptUrl=${scriptUrl.substring(0, 40)}...`);
 
-    // 加载音源脚本并等待 inited 事件
-    logInfo('加载音源脚本，等待初始化...');
-    const result = await songloft.jsenv.executeWait(
-      ENV_NAME,
-      scriptCode,
-      30000,
-      ['inited', 'updateAlert']
-    );
-
-    if (result.error) {
-      logError(`音源脚本执行错误: ${result.error}`);
-      lastInitError = `脚本执行错误: ${result.error}`;
+    // 下载脚本（有缓存，不会重复下载）
+    const scriptCode = await downloadScript(scriptUrl);
+    if (!scriptCode) {
       return false;
     }
 
-    // 收集并输出初始化阶段的 console_log 事件
-    const initConsoleLogs = result.events.filter(e => e.name === 'console_log');
-    for (const cl of initConsoleLogs) {
+    try {
+      // 销毁旧环境（无论 envReady 状态，都先尝试销毁，避免 "already exists" 错误）
       try {
-        const clData = JSON.parse(cl.data);
-        if (clData.level === 'error' || clData.level === 'warn') {
-          logWarn(`[音源脚本] ${clData.msg}`);
-        } else {
-          logInfo(`[音源脚本] ${clData.msg}`);
-        }
+        await songloft.jsenv.destroy(ENV_NAME);
       } catch {
-        // ignore
+        // 环境不存在时忽略错误
       }
-    }
+      envReady = false;
+      loadedScriptUrl = null;
 
-    // 解析 inited 事件，获取支持的来源
-    const initedEvent = result.events.find(e => e.name === 'inited');
-    if (!initedEvent) {
-      logWarn('音源脚本未发送 inited 事件（可能初始化失败）');
-      lastInitError = '脚本未发送 inited 事件';
-      // 打印 result.result 帮助调试
-      logWarn(`脚本执行结果: ${(result.result || '').substring(0, 200)}`);
-      if (result.events.length > 0) {
-        logWarn(`收到的事件: ${result.events.map(e => e.name).join(', ')}`);
-      }
-      return false;
-    }
+      // 创建新环境，注入 lx 初始化代码
+      logInfo('创建 jsenv 子环境...');
+      await songloft.jsenv.create(ENV_NAME, LX_INIT_CODE);
 
-    try {
-      const initedData = JSON.parse(initedEvent.data);
-      if (initedData.status === false) {
-        logError('音源脚本初始化失败: status=false');
-        lastInitError = '脚本初始化失败 (status=false)';
+      // 加载音源脚本并等待 inited 事件
+      logInfo('加载音源脚本，等待初始化...');
+      const result = await songloft.jsenv.executeWait(
+        ENV_NAME,
+        scriptCode,
+        30000,
+        ['inited', 'updateAlert']
+      );
+
+      if (result.error) {
+        logError(`音源脚本执行错误: ${result.error}`);
+        lastInitError = `脚本执行错误: ${result.error}`;
         return false;
       }
-      if (initedData.sources) {
-        supportedSources = Object.keys(initedData.sources);
-        logInfo(`音源脚本已初始化，支持来源: ${supportedSources.join(', ')}`);
-      } else {
-        supportedSources = ['kw', 'kg', 'tx', 'wy', 'mg'];
-        logInfo('音源脚本已初始化（未声明来源，默认全部支持）');
-      }
-      lastInitError = '';
-    } catch {
-      supportedSources = ['kw', 'kg', 'tx', 'wy', 'mg'];
-      logInfo('音源脚本已初始化（来源解析失败，默认全部支持）');
-      lastInitError = '';
-    }
 
-    envReady = true;
-    loadedScriptUrl = scriptUrl;
-    logInfo('音源环境初始化完成，后续歌曲将复用此环境');
-    return true;
-  } catch (e) {
-    logError(`初始化音源环境失败: ${String(e)}`);
-    lastInitError = `初始化失败: ${String(e)}`;
-    return false;
-  }
+      // 收集并输出初始化阶段的 console_log 事件
+      const initConsoleLogs = result.events.filter(e => e.name === 'console_log');
+      for (const cl of initConsoleLogs) {
+        try {
+          const clData = JSON.parse(cl.data);
+          if (clData.level === 'error' || clData.level === 'warn') {
+            logWarn(`[音源脚本] ${clData.msg}`);
+          } else {
+            logInfo(`[音源脚本] ${clData.msg}`);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // 解析 inited 事件，获取支持的来源
+      const initedEvent = result.events.find(e => e.name === 'inited');
+      if (!initedEvent) {
+        logWarn('音源脚本未发送 inited 事件（可能初始化失败）');
+        lastInitError = '脚本未发送 inited 事件';
+        // 打印 result.result 帮助调试
+        logWarn(`脚本执行结果: ${(result.result || '').substring(0, 200)}`);
+        if (result.events.length > 0) {
+          logWarn(`收到的事件: ${result.events.map(e => e.name).join(', ')}`);
+        }
+        return false;
+      }
+
+      try {
+        const initedData = JSON.parse(initedEvent.data);
+        if (initedData.status === false) {
+          logError('音源脚本初始化失败: status=false');
+          lastInitError = '脚本初始化失败 (status=false)';
+          return false;
+        }
+        if (initedData.sources) {
+          supportedSources = Object.keys(initedData.sources);
+          logInfo(`音源脚本已初始化，支持来源: ${supportedSources.join(', ')}`);
+        } else {
+          supportedSources = ['kw', 'kg', 'tx', 'wy', 'mg'];
+          logInfo('音源脚本已初始化（未声明来源，默认全部支持）');
+        }
+        lastInitError = '';
+      } catch {
+        supportedSources = ['kw', 'kg', 'tx', 'wy', 'mg'];
+        logInfo('音源脚本已初始化（来源解析失败，默认全部支持）');
+        lastInitError = '';
+      }
+
+      envReady = true;
+      loadedScriptUrl = scriptUrl;
+      logInfo('音源环境初始化完成，后续歌曲将复用此环境');
+      return true;
+    } catch (e) {
+      logError(`初始化音源环境失败: ${String(e)}`);
+      lastInitError = `初始化失败: ${String(e)}`;
+      return false;
+    }
+  });
 }
 
 /**
@@ -623,104 +658,102 @@ function buildRequestCode(source: string, songId: string, quality: string): stri
 /**
  * 通过音源脚本请求音乐 URL
  *
- * @param source 音源标识（kw/kg/tx/wy/mg）
- * @param songId 歌曲 ID
- * @param quality 音质（128k/320k/flac/flac24bit）
- * @returns 音乐 URL 或 null
+ * 修复：包入互斥锁，强制串行执行（避免与同一 jsenv 子环境的并发请求错台）。
  */
 async function requestMusicUrl(
   source: string,
   songId: string,
   quality: string
 ): Promise<string | null> {
-  if (!envReady) {
-    logWarn('音源环境未初始化');
-    return null;
-  }
+  return withMutex(async () => {
+    if (!envReady) {
+      logWarn('音源环境未初始化');
+      return null;
+    }
 
-  const requestCode = buildRequestCode(source, songId, quality);
+    const requestCode = buildRequestCode(source, songId, quality);
 
-  try {
-    logInfo(`发送音源请求: ${source}/${songId} (音质=${quality})`);
-    const result = await songloft.jsenv.executeWait(
-      ENV_NAME,
-      requestCode,
-      30000,
-      ['musicUrl_result', 'musicUrl_error']
-    );
+    try {
+      logInfo(`发送音源请求: ${source}/${songId} (音质=${quality})`);
+      const result = await songloft.jsenv.executeWait(
+        ENV_NAME,
+        requestCode,
+        30000,
+        ['musicUrl_result', 'musicUrl_error']
+      );
 
-    if (result.error) {
-      logWarn(`音源请求执行错误: ${result.error}`);
+      if (result.error) {
+        logWarn(`音源请求执行错误: ${result.error}`);
+        // 环境可能已失效，标记为需要重新初始化
+        envReady = false;
+        return null;
+      }
+
+      // 收集并输出 console_log 事件（脚本调试输出）
+      const consoleLogs = result.events.filter(e => e.name === 'console_log');
+      for (const cl of consoleLogs) {
+        try {
+          const clData = JSON.parse(cl.data);
+          if (clData.level === 'error') {
+            logWarn(`[音源脚本] ${clData.msg}`);
+          } else if (clData.level === 'warn') {
+            logWarn(`[音源脚本] ${clData.msg}`);
+          } else {
+            logInfo(`[音源脚本] ${clData.msg}`);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // 查找结果事件
+      const successEvent = result.events.find(e => e.name === 'musicUrl_result');
+      if (successEvent) {
+        try {
+          const data = JSON.parse(successEvent.data);
+          if (data.url && data.url.startsWith('http')) {
+            logInfo(`音源解析成功: ${source}/${songId} → ${data.url.substring(0, 80)}...`);
+            return data.url;
+          }
+          logWarn(`音源返回的 URL 无效: ${data.url}`);
+          return null;
+        } catch (e) {
+          logWarn(`音源结果解析失败: ${String(e)} (data=${successEvent.data.substring(0, 200)})`);
+          return null;
+        }
+      }
+
+      const errorEvent = result.events.find(e => e.name === 'musicUrl_error');
+      if (errorEvent) {
+        try {
+          const data = JSON.parse(errorEvent.data);
+          const errMsg = data.message || data.error || 'unknown';
+          const errStack = data.stack ? ` | stack: ${data.stack.substring(0, 200)}` : '';
+          const errName = data.name ? ` [${data.name}]` : '';
+          logWarn(`音源解析失败: ${source}/${songId} - ${errName}${errMsg}${errStack}`);
+          return null;
+        } catch (e) {
+          logWarn(`音源错误解析失败: ${String(e)}`);
+          return null;
+        }
+      }
+
+      logWarn('音源请求超时，未收到响应');
+      return null;
+    } catch (e) {
+      logError(`音源请求异常: ${String(e)}`);
       // 环境可能已失效，标记为需要重新初始化
       envReady = false;
       return null;
     }
-
-    // 收集并输出 console_log 事件（脚本调试输出）
-    const consoleLogs = result.events.filter(e => e.name === 'console_log');
-    for (const cl of consoleLogs) {
-      try {
-        const clData = JSON.parse(cl.data);
-        if (clData.level === 'error') {
-          logWarn(`[音源脚本] ${clData.msg}`);
-        } else if (clData.level === 'warn') {
-          logWarn(`[音源脚本] ${clData.msg}`);
-        } else {
-          logInfo(`[音源脚本] ${clData.msg}`);
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    // 查找结果事件
-    const successEvent = result.events.find(e => e.name === 'musicUrl_result');
-    if (successEvent) {
-      const data = JSON.parse(successEvent.data);
-      if (data.url && data.url.startsWith('http')) {
-        logInfo(`音源解析成功: ${source}/${songId} → ${data.url.substring(0, 80)}...`);
-        return data.url;
-      }
-      logWarn(`音源返回的 URL 无效: ${data.url}`);
-      return null;
-    }
-
-    const errorEvent = result.events.find(e => e.name === 'musicUrl_error');
-    if (errorEvent) {
-      const data = JSON.parse(errorEvent.data);
-      const errMsg = data.message || data.error || 'unknown';
-      const errStack = data.stack ? ` | stack: ${data.stack.substring(0, 200)}` : '';
-      const errName = data.name ? ` [${data.name}]` : '';
-      logWarn(`音源解析失败: ${source}/${songId} - ${errName}${errMsg}${errStack}`);
-      return null;
-    }
-
-    logWarn('音源请求超时，未收到响应');
-    return null;
-  } catch (e) {
-    logError(`音源请求异常: ${String(e)}`);
-    // 环境可能已失效，标记为需要重新初始化
-    envReady = false;
-    return null;
-  }
+  });
 }
 
 /**
  * 使用自定义音源脚本解析音乐 URL
  *
- * 优化策略：优先复用当前已加载的音源环境，避免各脚本之间反复销毁重建。
- * 只有当当前脚本不支持请求的来源或解析失败时，才尝试其他脚本。
- *
- * 流程：
- * 1. 如果当前环境已就绪且支持此来源，直接请求 URL（不重新初始化）
- * 2. 如果当前环境不支持或请求失败，逐个尝试其他脚本
- * 3. 跳过已加载的当前脚本（避免重复尝试）
- *
- * @param customSourceUrls 自定义音源脚本 URL 列表
- * @param source 音源标识（kw/kg/tx/wy/mg）
- * @param songId 歌曲 ID
- * @param quality 音质
- * @returns 音乐 URL 或 null
+ * 修复：本函数会进一步串行调用 initEnv/requestMusicUrl，
+ *       由于内部已用互斥锁，外层即使在并发上下文中调用也是安全的。
  */
 export async function resolveUrlWithCustomSource(
   customSourceUrls: string[],
@@ -760,7 +793,7 @@ export async function resolveUrlWithCustomSource(
     }
 
     // 初始化环境（如果尚未加载此脚本）
-    // 注意：initEnv 在切换脚本时会销毁旧环境
+    // 注意：initEnv 在切换脚本时会销毁旧环境，且已自带互斥锁
     const ok = await initEnv(scriptUrl);
     if (!ok) {
       logWarn(`音源脚本初始化失败，尝试下一个: ${scriptUrl}`);
@@ -803,16 +836,18 @@ export function isCustomSourceReady(): boolean {
  * 清理资源（销毁 jsenv）
  */
 export async function cleanup(): Promise<void> {
-  if (envReady) {
-    try {
-      await songloft.jsenv.destroy(ENV_NAME);
-    } catch {
-      // 忽略
+  await withMutex(async () => {
+    if (envReady) {
+      try {
+        await songloft.jsenv.destroy(ENV_NAME);
+      } catch {
+        // 忽略
+      }
+      envReady = false;
+      loadedScriptUrl = null;
+      supportedSources = [];
     }
-    envReady = false;
-    loadedScriptUrl = null;
-    supportedSources = [];
-  }
+  });
 }
 
 /**

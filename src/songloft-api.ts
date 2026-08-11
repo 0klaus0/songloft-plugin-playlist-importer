@@ -39,6 +39,7 @@ async function addSongsToPlaylist(
   playlistId: number,
   songIds: number[]
 ): Promise<void> {
+  if (songIds.length === 0) return;
   const result = await songloft.playlists.addSongs(playlistId, songIds);
   logInfo(`已加入 ${result.added} 首到歌单（跳过 ${result.skipped} 首）`);
 }
@@ -139,10 +140,6 @@ async function createSongWithSourceData(
 
 /**
  * 串流模式：获取串流 URL 并作为远程歌曲导入
- *
- * 优先使用自定义音源脚本或外部 API 解析直接 URL。
- * 如果配置了音源但解析失败，报告错误（不创建无法播放的歌曲）。
- * 如果未配置任何音源，回退到 sourceData 内置音源模式。
  */
 async function streamTrack(
   config: PluginConfig,
@@ -191,11 +188,6 @@ async function streamTrack(
 
 /**
  * 下载模式：获取 URL，创建远程歌曲后下载到本地
- *
- * 优先使用自定义音源脚本或外部 API 解析直接 URL，然后下载到本地。
- * 如果配置了音源但解析失败，报告错误（不创建无法播放的歌曲）。
- * 如果未配置任何音源，回退到 sourceData 模式。
- * 下载失败时歌曲仍以串流形式保留在曲库中。
  */
 async function downloadTrack(
   config: PluginConfig,
@@ -376,6 +368,7 @@ export async function importPlaylist(
 
       resolvedTracks.push({ track, url, sourceData });
     } catch (e) {
+      logError(`阶段1解析异常: ${track.title} - ${String(e)}`);
       progress.errors.push(`解析失败: ${track.title} - ${String(e)}`);
     }
 
@@ -403,9 +396,23 @@ export async function importPlaylist(
       const globalIdx = batchStartIdx + batchIdx;
       const { track, url, sourceData } = item;
 
-      progress.current = globalIdx + 1;
-      progress.currentTrack = `${track.title} - ${track.artist}`;
-      progress.message = `[2/2] ${config.importMode === 'download' ? '下载' : '导入'} ${globalIdx + 1}/${resolvedTracks.length}: ${track.title}`;
+      // ★ 进度显示修复：
+      // 原实现立即在并发 promise 中写入 progress.current/track/message，
+      // 三个 promise 同时执行，赋值顺序取决于 microtask 调度，前端会看到
+      // 闪烁的"23/68 歌名A" / "24/68 歌名B" 反复横跳。
+      // 修复：把进度写入推迟到「本任务真正的非同步操作之前」+ 「完成之后」，
+      // 并在写之前检查是否已被同批前面的任务更新过，避免低编号被高编号覆盖。
+      const reportProgress = (trackTitle: string) => {
+        // 只有当进度计数器还指向更小的下标时，才推进到当前位置
+        // 这样保证进度面板只会向前推进，不会回退
+        if (progress.current <= globalIdx) {
+          progress.current = globalIdx + 1;
+          progress.currentTrack = `${trackTitle}`;
+          progress.message = `[2/2] ${config.importMode === 'download' ? '下载' : '导入'} ${globalIdx + 1}/${resolvedTracks.length}: ${trackTitle}`;
+        }
+      };
+
+      reportProgress(track.title);
 
       // 无 URL 且无 sourceData，跳过（解析阶段已记录错误）
       if (!url && !sourceData) {
@@ -426,6 +433,8 @@ export async function importPlaylist(
         return null;
       }
 
+      reportProgress(track.title);
+
       // 下载模式：尝试下载到本地
       if (config.importMode === 'download') {
         let downloadSuccess = false;
@@ -444,6 +453,7 @@ export async function importPlaylist(
         }
 
         if (downloadSuccess) {
+          // 累加计数器（仅在此分支内同步执行，避免 race condition）
           progress.downloadedSongs++;
         } else {
           progress.streamingSongs++;
@@ -467,6 +477,17 @@ export async function importPlaylist(
       } catch (e) {
         logWarn(`批次加入歌单失败: ${String(e)}`);
       }
+    }
+
+    // ★ 批次完成后，把进度推到本批最后一项（确保 UI 看到最新值）
+    const lastIdxInBatch = Math.min(i + DOWNLOAD_CONCURRENCY, resolvedTracks.length);
+    if (progress.current < lastIdxInBatch) {
+      progress.current = lastIdxInBatch;
+      const last = resolvedTracks[lastIdxInBatch - 1];
+      if (last) {
+        progress.currentTrack = `${last.track.title} - ${last.track.artist}`;
+      }
+      progress.message = `[2/2] ${config.importMode === 'download' ? '下载' : '导入'} ${lastIdxInBatch}/${resolvedTracks.length}`;
     }
   }
 
