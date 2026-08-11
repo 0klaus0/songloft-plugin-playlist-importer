@@ -28,6 +28,99 @@ function joinArtists(artists: { name?: string }[] | undefined): string {
  *       2. 失败时尝试 JSON5 式宽松解析（容许末尾多余逗号）
  *       3. 解析失败返回 null，由调用方记录错误而不崩溃整个流程
  */
+/**
+ * 解析单引号 JSON（Python repr 风格），例如酷我 r.s 接口实际返回：
+ *   {'ARTISTPIC':'', 'abslist':[{'SONGNAME':'...'}]}
+ * 标准 JSON.parse 遇到单引号会直接抛错，这里用状态机正确还原，
+ * 并能正确处理字符串内部包含的双引号（如歌名 Let It Go - From "Frozen"）。
+ */
+function parseSingleQuotedJson(text: string): unknown {
+  const src = text.trim();
+  let i = 0;
+  const len = src.length;
+  const isWs = (c: string) => c === ' ' || c === '\t' || c === '\n' || c === '\r';
+  const skipWs = () => { while (i < len && isWs(src[i])) i++; };
+  function parseValue(): unknown {
+    skipWs();
+    if (i >= len) return undefined;
+    const c = src[i];
+    if (c === '{') return parseObject();
+    if (c === '[') return parseArray();
+    if (c === "'" || c === '"') return parseString(c);
+    return parsePrimitive();
+  }
+  function parseObject(): Record<string, unknown> {
+    const obj: Record<string, unknown> = {};
+    i++;
+    while (i < len) {
+      skipWs();
+      if (src[i] === '}') { i++; return obj; }
+      let key: string;
+      if (src[i] === "'" || src[i] === '"') key = parseString(src[i]);
+      else key = String(parsePrimitive());
+      skipWs();
+      if (src[i] === ':') i++;
+      const val = parseValue();
+      obj[key] = val;
+      skipWs();
+      if (src[i] === ',') { i++; continue; }
+      if (src[i] === '}') { i++; return obj; }
+      break;
+    }
+    return obj;
+  }
+  function parseArray(): unknown[] {
+    const arr: unknown[] = [];
+    i++;
+    while (i < len) {
+      skipWs();
+      if (src[i] === ']') { i++; return arr; }
+      arr.push(parseValue());
+      skipWs();
+      if (src[i] === ',') { i++; continue; }
+      if (src[i] === ']') { i++; return arr; }
+      break;
+    }
+    return arr;
+  }
+  function parseString(quote: string): string {
+    i++;
+    let s = '';
+    while (i < len) {
+      const c = src[i];
+      if (c === '\\') {
+        const n = src[i + 1];
+        if (n === 'n') s += '\n';
+        else if (n === 't') s += '\t';
+        else if (n === 'r') s += '\r';
+        else if (n === 'b') s += '\b';
+        else if (n === 'f') s += '\f';
+        else if (n === '0') s += '\0';
+        else s += n;
+        i += 2;
+        continue;
+      }
+      if (c === quote) { i++; return s; }
+      s += c;
+      i++;
+    }
+    return s;
+  }
+  function parsePrimitive(): unknown {
+    const start = i;
+    while (i < len && !/[\s,}\]]/.test(src[i])) i++;
+    const raw = src.slice(start, i).trim();
+    if (raw === '') return undefined;
+    if (raw === 'None' || raw === 'null') return null;
+    if (raw === 'True') return true;
+    if (raw === 'False') return false;
+    if (/^-?\d+$/.test(raw)) return parseInt(raw, 10);
+    if (/^-?\d*\.\d+$/.test(raw)) return parseFloat(raw);
+    return raw;
+  }
+  return parseValue();
+}
+
 function safeJsonParse(text: string): Record<string, unknown> | null {
   if (!text) return null;
   const trimmed = text.trim();
@@ -40,6 +133,13 @@ function safeJsonParse(text: string): Record<string, unknown> | null {
   try {
     return JSON.parse(trimmed) as Record<string, unknown>;
   } catch {
+    // 处理酷我等平台返回的单引号 JSON（Python repr 风格）
+    try {
+      const pyData = parseSingleQuotedJson(trimmed);
+      if (pyData && typeof pyData === 'object') {
+        return pyData as Record<string, unknown>;
+      }
+    } catch { /* 继续尝试其他修复 */ }
     // 容许末尾多余逗号（部分平台接口偶发返回非法 JSON）
     try {
       const fixed = trimmed.replace(/,\s*([}\]])/g, '$1');

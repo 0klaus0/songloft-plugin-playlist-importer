@@ -45,7 +45,100 @@ function buildApiUrl(config: PluginConfig, source: LXSource, songId: string, qua
 }
 
 /**
+ * 解析单引号 JSON（Python repr 风格，如酷我 r.s 接口实际返回）。
+ * 标准 JSON.parse 遇到单引号会抛错，这里用状态机正确还原，
+ * 且能处理字符串内部包含的双引号。
+ */
+function parseSingleQuotedJson(text: string): unknown {
+  const src = text.trim();
+  let i = 0;
+  const len = src.length;
+  const isWs = (c: string) => c === ' ' || c === '\t' || c === '\n' || c === '\r';
+  const skipWs = () => { while (i < len && isWs(src[i])) i++; };
+  function parseValue(): unknown {
+    skipWs();
+    if (i >= len) return undefined;
+    const c = src[i];
+    if (c === '{') return parseObject();
+    if (c === '[') return parseArray();
+    if (c === "'" || c === '"') return parseString(c);
+    return parsePrimitive();
+  }
+  function parseObject(): Record<string, unknown> {
+    const obj: Record<string, unknown> = {};
+    i++;
+    while (i < len) {
+      skipWs();
+      if (src[i] === '}') { i++; return obj; }
+      let key: string;
+      if (src[i] === "'" || src[i] === '"') key = parseString(src[i]);
+      else key = String(parsePrimitive());
+      skipWs();
+      if (src[i] === ':') i++;
+      const val = parseValue();
+      obj[key] = val;
+      skipWs();
+      if (src[i] === ',') { i++; continue; }
+      if (src[i] === '}') { i++; return obj; }
+      break;
+    }
+    return obj;
+  }
+  function parseArray(): unknown[] {
+    const arr: unknown[] = [];
+    i++;
+    while (i < len) {
+      skipWs();
+      if (src[i] === ']') { i++; return arr; }
+      arr.push(parseValue());
+      skipWs();
+      if (src[i] === ',') { i++; continue; }
+      if (src[i] === ']') { i++; return arr; }
+      break;
+    }
+    return arr;
+  }
+  function parseString(quote: string): string {
+    i++;
+    let s = '';
+    while (i < len) {
+      const c = src[i];
+      if (c === '\\') {
+        const n = src[i + 1];
+        if (n === 'n') s += '\n';
+        else if (n === 't') s += '\t';
+        else if (n === 'r') s += '\r';
+        else if (n === 'b') s += '\b';
+        else if (n === 'f') s += '\f';
+        else if (n === '0') s += '\0';
+        else s += n;
+        i += 2;
+        continue;
+      }
+      if (c === quote) { i++; return s; }
+      s += c;
+      i++;
+    }
+    return s;
+  }
+  function parsePrimitive(): unknown {
+    const start = i;
+    while (i < len && !/[\s,}\]]/.test(src[i])) i++;
+    const raw = src.slice(start, i).trim();
+    if (raw === '') return undefined;
+    if (raw === 'None' || raw === 'null') return null;
+    if (raw === 'True') return true;
+    if (raw === 'False') return false;
+    if (/^-?\d+$/.test(raw)) return parseInt(raw, 10);
+    if (/^-?\d*\.\d+$/.test(raw)) return parseFloat(raw);
+    return raw;
+  }
+  return parseValue();
+}
+
+/**
  * 安全解析 JSON：返回 Record 或 null，避免因 HTML/纯文本/截断 JSON 触发 SyntaxError。
+ * 兼容酷我等平台返回的单引号 JSON（Python repr 风格）。
  */
 function safeJsonParse(text: string): Record<string, unknown> | null {
   if (!text) return null;
@@ -58,6 +151,12 @@ function safeJsonParse(text: string): Record<string, unknown> | null {
   try {
     return JSON.parse(trimmed) as Record<string, unknown>;
   } catch {
+    try {
+      const pyData = parseSingleQuotedJson(trimmed);
+      if (pyData && typeof pyData === 'object') {
+        return pyData as Record<string, unknown>;
+      }
+    } catch { /* ignore */ }
     return null;
   }
 }
@@ -142,44 +241,64 @@ export async function getMusicUrl(
  * @param targetSource 目标音源平台
  * @returns 匹配到的歌曲 ID，若无匹配则返回 null
  */
+/**
+ * 跨平台匹配结果：同时携带匹配到的音源平台。
+ * fallback 可能命中非默认源，调用方必须按实际 source 去取 URL，
+ * 否则会出现「用酷我 source + 网易云 songId」这类不匹配而取不到地址。
+ */
+export interface MatchResult {
+  songId: string;
+  source: LXSource;
+}
+
+/**
+ * 跨平台搜索时依次尝试的音源平台（按优先级）。
+ * 主源（config.defaultSearchSource）始终排第一，其余作为回退，
+ * 避免单一平台搜索失败/限流时整批拿不到 songId。
+ */
+const SEARCH_FALLBACK_SOURCES: LXSource[] = ['kw', 'wy', 'tx', 'kg', 'mg'];
+
 export async function crossPlatformMatch(
   track: TrackInfo,
   targetSource: LXSource
-): Promise<string | null> {
+): Promise<MatchResult | null> {
   const keyword = `${track.title} ${track.artist}`.trim();
-  logInfo(`跨平台搜索: "${keyword}" on ${targetSource}`);
+  const candidates = [targetSource, ...SEARCH_FALLBACK_SOURCES.filter((s) => s !== targetSource)];
+  logInfo(`跨平台搜索: "${keyword}" (候选源: ${candidates.join(',')})`);
 
-  try {
-    const results: SearchResult[] = await searchOnPlatform(keyword, targetSource, 5);
-    if (!results || results.length === 0) {
-      logWarn(`跨平台搜索无结果: "${keyword}"`);
-      return null;
-    }
-
-    // 尝试精确匹配
-    for (const r of results) {
-      const titleMatch = r.title.toLowerCase().includes(track.title.toLowerCase()) ||
-        track.title.toLowerCase().includes(r.title.toLowerCase());
-      const artistMatch = r.artist.toLowerCase().includes(track.artist.toLowerCase()) ||
-        track.artist.toLowerCase().includes(r.artist.toLowerCase()) ||
-        track.artist === '未知艺术家';
-
-      if (titleMatch && artistMatch) {
-        logInfo(`跨平台匹配成功: "${track.title}" → "${r.title}" (${r.songId})`);
-        return r.songId;
+  for (const src of candidates) {
+    try {
+      const results: SearchResult[] = await searchOnPlatform(keyword, src, 5);
+      if (!results || results.length === 0) {
+        logWarn(`跨平台搜索无结果: "${keyword}" on ${src}`);
+        continue;
       }
-    }
 
-    // 如果没有精确匹配，取第一个结果（最相关）
-    const first = results[0];
-    logInfo(`跨平台模糊匹配: "${track.title}" → "${first.title}" (${first.songId})`);
-    return first.songId;
-  } catch (e) {
-    // 修复：抛出在阶段 1 顺序处理时被外层 try/catch 捕获，
-    //       不让一个搜索失败阻断整批歌单导入
-    logWarn(`跨平台搜索失败: "${keyword}" - ${String(e)}`);
-    return null;
+      // 尝试精确匹配
+      for (const r of results) {
+        const titleMatch = r.title.toLowerCase().includes(track.title.toLowerCase()) ||
+          track.title.toLowerCase().includes(r.title.toLowerCase());
+        const artistMatch = r.artist.toLowerCase().includes(track.artist.toLowerCase()) ||
+          track.artist.toLowerCase().includes(r.artist.toLowerCase()) ||
+          track.artist === '未知艺术家';
+
+        if (titleMatch && artistMatch) {
+          logInfo(`跨平台匹配成功(${src}): "${track.title}" → "${r.title}" (${r.songId})`);
+          return { songId: r.songId, source: src };
+        }
+      }
+
+      // 如果没有精确匹配，取第一个结果（最相关）
+      const first = results[0];
+      logInfo(`跨平台模糊匹配(${src}): "${track.title}" → "${first.title}" (${first.songId})`);
+      return { songId: first.songId, source: src };
+    } catch (e) {
+      logWarn(`跨平台搜索失败: ${src} "${keyword}" - ${String(e)}`);
+    }
   }
+
+  logWarn(`跨平台搜索无结果: "${keyword}"（已尝试 ${candidates.join(',')}）`);
+  return null;
 }
 
 /**
@@ -228,13 +347,13 @@ export async function resolveTrackUrl(
   } else {
     // 平台无直接对应（如汽水音乐），跨平台搜索
     logInfo(`跨平台搜索匹配: ${track.title}`);
-    const matchedId = await crossPlatformMatch(track, targetSource);
-    if (!matchedId) {
+    const matched = await crossPlatformMatch(track, targetSource);
+    if (!matched) {
       logWarn(`无法匹配曲目: ${track.title} - ${track.artist}`);
       return null;
     }
-    source = targetSource;
-    songId = matchedId;
+    source = matched.source;
+    songId = matched.songId;
   }
 
   // 优先级 1：自定义音源脚本
@@ -269,14 +388,14 @@ export async function resolveTrackUrl(
         };
       }
       // 原始来源失败，尝试跨平台搜索后用默认来源
-      const matchedId = await crossPlatformMatch(track, targetSource);
-      if (matchedId) {
-        const url = await getMusicUrl(config, targetSource, matchedId, config.defaultQuality);
+      const matched = await crossPlatformMatch(track, targetSource);
+      if (matched) {
+        const url = await getMusicUrl(config, matched.source, matched.songId, config.defaultQuality);
         if (url) {
           return {
             url,
-            source: targetSource,
-            songId: matchedId,
+            source: matched.source,
+            songId: matched.songId,
             quality: config.defaultQuality,
             matched: true,
           };
@@ -333,15 +452,15 @@ export async function generateSourceData(
 
   // 平台无直接对应（如汽水音乐），跨平台搜索匹配
   logInfo(`跨平台搜索生成 sourceData: ${track.title}`);
-  const matchedId = await crossPlatformMatch(track, targetSource);
-  if (!matchedId) {
+  const matched = await crossPlatformMatch(track, targetSource);
+  if (!matched) {
     logWarn(`无法匹配曲目: ${track.title} - ${track.artist}`);
     return null;
   }
 
   const sourceData = {
-    source: targetSource,
-    id: matchedId,
+    source: matched.source,
+    id: matched.songId,
     quality: config.defaultQuality,
     title: track.title,
     artist: track.artist,
