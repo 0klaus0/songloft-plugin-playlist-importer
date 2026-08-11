@@ -708,8 +708,13 @@ async function requestMusicUrl(
 /**
  * 使用自定义音源脚本解析音乐 URL
  *
- * 遍历用户配置的所有音源脚本 URL，逐个尝试初始化并请求 URL。
- * 第一个成功返回有效 URL 的脚本即为最终结果。
+ * 优化策略：优先复用当前已加载的音源环境，避免各脚本之间反复销毁重建。
+ * 只有当当前脚本不支持请求的来源或解析失败时，才尝试其他脚本。
+ *
+ * 流程：
+ * 1. 如果当前环境已就绪且支持此来源，直接请求 URL（不重新初始化）
+ * 2. 如果当前环境不支持或请求失败，逐个尝试其他脚本
+ * 3. 跳过已加载的当前脚本（避免重复尝试）
  *
  * @param customSourceUrls 自定义音源脚本 URL 列表
  * @param source 音源标识（kw/kg/tx/wy/mg）
@@ -731,9 +736,31 @@ export async function resolveUrlWithCustomSource(
     return null;
   }
 
-  // 逐个尝试音源脚本
+  // 优先复用当前已加载的音源环境
+  if (envReady && loadedScriptUrl) {
+    const supportsSource = supportedSources.length === 0 || supportedSources.includes(source);
+    if (supportsSource) {
+      logInfo(`复用当前音源环境: ${loadedScriptUrl.substring(0, 50)}...`);
+      const url = await requestMusicUrl(source, songId, quality);
+      if (url) {
+        return url;
+      }
+      logWarn(`当前音源脚本解析失败，尝试其他脚本: ${source}/${songId}`);
+    } else {
+      logInfo(`当前音源脚本不支持来源 ${source}，切换其他脚本`);
+    }
+  }
+
+  // 逐个尝试其他音源脚本（跳过已加载的当前脚本）
   for (const scriptUrl of urls) {
+    // 跳过已加载并已尝试过的当前脚本
+    if (envReady && loadedScriptUrl === scriptUrl) {
+      logInfo(`跳过已尝试的当前脚本: ${scriptUrl.substring(0, 40)}...`);
+      continue;
+    }
+
     // 初始化环境（如果尚未加载此脚本）
+    // 注意：initEnv 在切换脚本时会销毁旧环境
     const ok = await initEnv(scriptUrl);
     if (!ok) {
       logWarn(`音源脚本初始化失败，尝试下一个: ${scriptUrl}`);

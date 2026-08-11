@@ -1,6 +1,6 @@
 {
   "name": "songloft-plugin-playlist-importer",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "识别市面音乐软件分享歌单，导入至 Songloft 或通过洛雪音源下载",
   "author": "0klaus0",
   "license": "Apache-2.0",
