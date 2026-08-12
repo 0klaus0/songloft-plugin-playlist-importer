@@ -24,7 +24,7 @@ export function errorResponse(message: string, statusCode = 400): HTTPResponse {
 /**
  * 将 Uint8Array 或 string 转为 string
  */
-function bodyToString(body: Uint8Array | string | null): string {
+export function bodyToString(body: Uint8Array | string | null): string {
   if (!body) return '';
   if (typeof body === 'string') return body;
   // Uint8Array → string (UTF-8)

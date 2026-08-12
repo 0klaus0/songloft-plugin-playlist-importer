@@ -17,9 +17,9 @@
  */
 /// <reference types="@songloft/plugin-sdk" />
 import { jsonResponse, createRouter } from '@songloft/plugin-sdk';
-import { PluginConfig, ImportProgress, PlaylistInfo } from './types';
-import { errorResponse, parseBody } from './utils';
-import { loadConfig, saveConfig, validateConfig } from './config';
+import { PluginConfig, ImportProgress, PlaylistInfo, CustomSource } from './types';
+import { errorResponse, parseBody, bodyToString } from './utils';
+import { loadConfig, saveConfig, validateConfig, saveUploadedSource, deleteUploadedSource, makeSourceFileId, SOURCE_FILE_KEY_PREFIX } from './config';
 import { parseShareLink, getSupportedPlatforms } from './parsers';
 import { fetchPlaylist } from './fetchers';
 import { testLuoxueServer } from './luoxue';
@@ -65,6 +65,21 @@ router.post('/api/config', async (req) => {
   const currentConfig = await getConfig();
 
   // 合并配置（密码为 ****** 时保留原值）
+  // 优先使用 customSources（新格式）；否则由旧字段 customSourceUrls 构建
+  let customSources: CustomSource[];
+  if (Array.isArray(body.customSources)) {
+    customSources = body.customSources
+      .filter((s) => s && (s.kind === 'url' || s.kind === 'file') && s.value)
+      .map((s) => ({ kind: s.kind, value: String(s.value), name: s.name || String(s.value) }));
+  } else if (Array.isArray(body.customSourceUrls)) {
+    customSources = body.customSourceUrls
+      .map((u) => String(u).trim())
+      .filter((u) => u.length > 0)
+      .map((u) => ({ kind: 'url' as const, value: u, name: u }));
+  } else {
+    customSources = currentConfig.customSources;
+  }
+
   const newConfig: PluginConfig = {
     luoxueApiUrl: body.luoxueApiUrl ?? currentConfig.luoxueApiUrl,
     luoxueApiPass: body.luoxueApiPass === '******' ? currentConfig.luoxueApiPass : (body.luoxueApiPass ?? ''),
@@ -72,7 +87,8 @@ router.post('/api/config', async (req) => {
     importMode: body.importMode ?? currentConfig.importMode,
     defaultSearchSource: body.defaultSearchSource ?? currentConfig.defaultSearchSource,
     useBuiltinSource: body.useBuiltinSource ?? currentConfig.useBuiltinSource,
-    customSourceUrls: Array.isArray(body.customSourceUrls) ? body.customSourceUrls : currentConfig.customSourceUrls,
+    customSourceUrls: customSources.filter((s) => s.kind === 'url').map((s) => s.value),
+    customSources,
   };
 
   // 验证
@@ -92,6 +108,64 @@ router.get('/api/platforms', () => {
     success: true,
     platforms: getSupportedPlatforms(),
   });
+});
+
+/**
+ * POST /api/upload-source — 上传洛雪音源脚本文件
+ * 请求体为脚本原始字节（前端以 raw body 发送），文件名通过查询参数 ?name= 传递。
+ * 脚本内容存于 songloft.storage（按内容哈希 id 索引，避免重复存储）。
+ */
+router.post('/api/upload-source', async (req) => {
+  const raw = req.body;
+  if (!raw || raw.length === 0) {
+    return errorResponse('未收到文件内容');
+  }
+  // Uint8Array → UTF-8 字符串（兼容 QuickJS 运行时，不使用 TextDecoder）
+  let content = bodyToString(raw).trim();
+
+  if (content.length < 100) {
+    return errorResponse('文件内容过短，可能不是有效的音源脚本');
+  }
+  // 轻量校验：排除 HTML 错误页，确认像洛雪音源脚本
+  if (/^\s*<!doctype html|<html[\s>]/i.test(content) || !/(lx\.on|request|source)/i.test(content)) {
+    return errorResponse('文件内容不像洛雪音源脚本（应包含 lx.on / source 等标识）');
+  }
+
+  // 文件名（来自查询参数，缺省用 id）
+  let name = 'uploaded.js';
+  try {
+    const params = new URLSearchParams((req as { query?: string }).query || '');
+    const n = params.get('name');
+    if (n) name = n.trim() || 'uploaded.js';
+  } catch { /* ignore */ }
+
+  const id = makeSourceFileId(content);
+  await saveUploadedSource(id, name, content);
+
+  return jsonResponse({ success: true, id, name, size: content.length });
+});
+
+/**
+ * POST /api/delete-source — 删除已上传的音源脚本文件
+ * body: { id: string }
+ */
+router.post('/api/delete-source', async (req) => {
+  const body = parseBody<{ id?: string }>(req.body);
+  if (!body.id) {
+    return errorResponse('缺少 id');
+  }
+  // 同时从配置中移除该文件引用
+  const currentConfig = await getConfig();
+  const before = currentConfig.customSources.length;
+  currentConfig.customSources = currentConfig.customSources.filter(
+    (s) => !(s.kind === 'file' && s.value === body.id)
+  );
+  if (currentConfig.customSources.length !== before) {
+    await saveConfig(currentConfig);
+    configCache = currentConfig;
+  }
+  await deleteUploadedSource(body.id);
+  return jsonResponse({ success: true, message: '已删除' });
 });
 
 /** POST /api/parse — 解析分享链接 */
@@ -227,7 +301,7 @@ router.get('/api/status', () => {
   return jsonResponse({ success: true, progress: currentProgress });
 });
 
-/** POST /api/test-luoxue — 测试洛雪音源服务器 */
+/** POST /api/test-luoxue — 测试洛雪音源服务器（按平台返回状态） */
 router.post('/api/test-luoxue', async () => {
   const config = await getConfig();
   const result = await testLuoxueServer(config);
@@ -291,8 +365,10 @@ async function onInit(): Promise<void> {
   // 预加载配置
   getConfig().then((config) => {
     logInfo(`当前配置: 模式=${config.importMode}, 音质=${config.defaultQuality}, 来源=${config.defaultSearchSource}`);
-    if (config.customSourceUrls && config.customSourceUrls.length > 0) {
-      logInfo(`音源模式: ${config.customSourceUrls.length} 个自定义洛雪音源脚本`);
+    if (config.customSources && config.customSources.length > 0) {
+      const urlN = config.customSources.filter((s) => s.kind === 'url').length;
+      const fileN = config.customSources.filter((s) => s.kind === 'file').length;
+      logInfo(`音源模式: ${config.customSources.length} 个自定义洛雪音源（URL ${urlN} / 上传 ${fileN}）`);
     } else if (config.useBuiltinSource) {
       logInfo('音源模式: Songloft 内置洛雪音源（无需外部 API）');
     } else if (config.luoxueApiUrl) {

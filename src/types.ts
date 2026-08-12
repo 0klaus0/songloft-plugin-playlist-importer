@@ -33,6 +33,28 @@ export const LX_SOURCE_NAMES: Record<LXSource, string> = {
   mg: '咪咕音乐',
 };
 
+/** 全部洛雪来源（按常用优先级排序，用于多渠道回退与平台探测） */
+export const ALL_LX_SOURCES: LXSource[] = ['kw', 'kg', 'tx', 'wy', 'mg'];
+
+/**
+ * 自定义音源（统一描述：既支持 URL，也支持本地上传的脚本文件）
+ * - kind='url'：value 为脚本地址（http/https）
+ * - kind='file'：value 为插件 storage 中的文件 id（脚本内容存于 storage）
+ */
+export interface CustomSource {
+  kind: 'url' | 'file';
+  value: string;
+  name: string;
+}
+
+/** 单个平台的检测结果（用于前端像洛雪一样按平台展示可用性） */
+export interface PlatformStatus {
+  source: LXSource;
+  name: string;
+  status: 'ok' | 'fail' | 'unsupported' | 'unreachable';
+  reason?: string;
+}
+
 /** 平台中文名称 */
 export const PLATFORM_NAMES: Record<Platform, string> = {
   netease: '网易云音乐',
@@ -85,8 +107,10 @@ export interface PluginConfig {
   defaultSearchSource: LXSource;
   /** 是否使用 Songloft 内置音源（true 时不需要外部洛雪 API） */
   useBuiltinSource: boolean;
-  /** 自定义洛雪音源脚本 URL 列表（支持多个，按顺序尝试） */
+  /** 自定义洛雪音源脚本 URL 列表（支持多个，按顺序尝试）—— 向后兼容，新版本使用 customSources */
   customSourceUrls: string[];
+  /** 自定义洛雪音源（统一描述：URL 或本地上传的脚本文件） */
+  customSources: CustomSource[];
 }
 
 /** 默认配置 */
@@ -98,6 +122,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   defaultSearchSource: 'kw',
   useBuiltinSource: true,
   customSourceUrls: [],
+  customSources: [],
 };
 
 /** 导入进度回调 */

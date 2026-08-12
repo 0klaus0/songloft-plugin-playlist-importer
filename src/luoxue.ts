@@ -10,10 +10,10 @@
  * 通过搜索目标平台找到对应歌曲 ID，再获取下载链接。
  */
 /// <reference types="@songloft/plugin-sdk" />
-import { PluginConfig, TrackInfo, LXSource, PLATFORM_TO_LX, SearchResult } from './types';
+import { PluginConfig, TrackInfo, LXSource, PLATFORM_TO_LX, SearchResult, ALL_LX_SOURCES, PlatformStatus } from './types';
 import { fetchWithTimeout } from './utils';
 import { searchMusic as searchOnPlatform } from './fetchers';
-import { resolveUrlWithCustomSource } from './lx-source';
+import { resolveUrlWithCustomSource, loadSourceContent, getLoadedSupportedSources, probePlatforms, SourceDescriptor } from './lx-source';
 import { logInfo, logWarn, logError } from './logger';
 
 /** 洛雪音源获取结果 */
@@ -322,16 +322,33 @@ export async function crossPlatformMatch(
 }
 
 /**
- * 获取曲目的音乐 URL（自动处理跨平台匹配和多种音源模式）
+ * 计算多渠道回退的候选来源顺序
  *
- * 优先级：
- * 1. 自定义音源脚本：通过 songloft.jsenv 加载用户提供的脚本解析 URL
- * 2. 外部洛雪 API：通过配置的 API 服务器获取
- * 3. 返回 null（由调用方回退到 sourceData 内置音源模式）
+ * - 优先使用歌单原始平台对应的洛雪来源（trackSource）
+ * - 其余来源按 ALL_LX_SOURCES 顺序补齐
+ * - 若已加载的自定义脚本声明了 supportedSources，则**仅在该脚本支持的范围内**回退
+ *   （脚本未声明时返回全部 5 个，兼容纯外部 API 模式）
  *
- * 跨平台匹配逻辑：
- * - 如果歌单平台有对应的洛雪来源，直接使用原始 songId
- * - 如果歌单平台无对应洛雪来源（如汽水音乐），跨平台搜索匹配
+ * 这回答了用户的疑问：插件默认不再“只从一个渠道取”，而是在失败时会
+ * 自动尝试脚本支持的其他渠道（例如酷狗后端挂了，自动回退到酷我/网易云等）。
+ */
+function getCandidateSources(config: PluginConfig, track: TrackInfo): LXSource[] {
+  const trackSource = PLATFORM_TO_LX[track.platform];
+  const supported = getLoadedSupportedSources();
+  const pool: LXSource[] = supported.length > 0 ? (supported as LXSource[]) : ALL_LX_SOURCES;
+  const ordered = trackSource
+    ? [trackSource, ...ALL_LX_SOURCES.filter((s) => s !== trackSource)]
+    : [...ALL_LX_SOURCES];
+  return ordered.filter((s) => pool.includes(s));
+}
+
+/**
+ * 获取曲目的音乐 URL（自动处理跨平台匹配 + 多渠道回退）
+ *
+ * 与旧版（只按单一映射来源取一次就放弃）不同，本函数会逐来源尝试：
+ *   1. 优先用歌单原始平台对应的洛雪来源（直接使用原始 songId）
+ *   2. 失败则在脚本支持的其它来源上跨平台搜索并取 URL（自定义脚本 → 外部 API）
+ *   3. 全部失败才返回 null（由调用方回退到 sourceData 内置音源模式）
  *
  * @param config 插件配置
  * @param track 曲目信息
@@ -341,102 +358,68 @@ export async function resolveTrackUrl(
   config: PluginConfig,
   track: TrackInfo
 ): Promise<LuoxueResult | null> {
-  const customUrls = (config.customSourceUrls || [])
-    .map(u => u.trim())
-    .filter(u => u.length > 0);
-  const hasExternalApi = !config.useBuiltinSource && config.luoxueApiUrl;
+  const customSources = (config.customSources || [])
+    .map((s) => ({ kind: s.kind, value: s.value, name: s.name || s.value }))
+    .filter((s) => s.value && s.value.length > 0);
+  const hasExternalApi = !config.useBuiltinSource && !!config.luoxueApiUrl;
 
-  // 既没有自定义音源脚本，也没有外部 API，返回 null（使用 sourceData）
-  if (customUrls.length === 0 && !hasExternalApi) {
+  // 既没有自定义音源，也没有外部 API，返回 null（使用 sourceData）
+  if (customSources.length === 0 && !hasExternalApi) {
     logInfo(`无可用音源，将使用 sourceData: ${track.title}`);
     return null;
   }
 
+  const descriptors: SourceDescriptor[] = customSources.map((s) => ({
+    name: s.name,
+    load: () => loadSourceContent(s),
+  }));
+
   const trackSource = PLATFORM_TO_LX[track.platform];
-  const targetSource = config.defaultSearchSource;
+  const candidateSources = getCandidateSources(config, track);
+  logInfo(`多渠道回退候选源: ${candidateSources.join(',')}（trackSource=${trackSource || '无'}）`);
 
-  // 确定音源来源和歌曲 ID
-  let source: LXSource;
-  let songId: string;
-
-  if (trackSource) {
-    // 平台有直接对应的洛雪来源
-    source = trackSource;
-    songId = track.platformSongId;
-    logInfo(`直接音源映射: ${track.title} → ${source}/${songId}`);
-  } else {
-    // 平台无直接对应（如汽水音乐），跨平台搜索
-    logInfo(`跨平台搜索匹配: ${track.title}`);
-    const matched = await crossPlatformMatch(track, targetSource);
-    if (!matched) {
-      logWarn(`无法匹配曲目: ${track.title} - ${track.artist}`);
-      return null;
-    }
-    source = matched.source;
-    songId = matched.songId;
-  }
-
-  // 优先级 1：自定义音源脚本
-  if (customUrls.length > 0) {
-    logInfo(`使用自定义音源脚本解析: ${source}/${songId} (音质=${config.defaultQuality})`);
-    const url = await resolveUrlWithCustomSource(customUrls, source, songId, config.defaultQuality);
-    if (url) {
-      logInfo(`自定义音源脚本解析成功: ${source}/${songId} → ${url.substring(0, 80)}...`);
-      return {
-        url,
-        source,
-        songId,
-        quality: config.defaultQuality,
-        matched: !trackSource || source !== trackSource,
-      };
-    }
-    logWarn(`自定义音源脚本解析失败: ${source}/${songId}（若所有歌曲均如此，多半是音源后端服务不可用，请在设置中“测试音源连通性”确认）`);
-  }
-
-  // 优先级 2：外部洛雪 API
-  if (hasExternalApi) {
-    // 如果原始来源与默认搜索来源不同，先尝试原始来源
-    if (trackSource && trackSource !== targetSource) {
-      const directUrl = await getMusicUrl(config, trackSource, songId, config.defaultQuality);
-      if (directUrl) {
-        return {
-          url: directUrl,
-          source: trackSource,
-          songId,
-          quality: config.defaultQuality,
-          matched: false,
-        };
-      }
-      // 原始来源失败，尝试跨平台搜索后用默认来源
-      const matched = await crossPlatformMatch(track, targetSource);
-      if (matched) {
-        const url = await getMusicUrl(config, matched.source, matched.songId, config.defaultQuality);
-        if (url) {
-          return {
-            url,
-            source: matched.source,
-            songId: matched.songId,
-            quality: config.defaultQuality,
-            matched: true,
-          };
-        }
-      }
+  for (const src of candidateSources) {
+    // 确定该来源的歌曲 ID
+    let songId: string | null = null;
+    if (trackSource && src === trackSource) {
+      songId = track.platformSongId;
+      logInfo(`直接音源映射: ${track.title} → ${src}/${songId}`);
     } else {
-      const url = await getMusicUrl(config, source, songId, config.defaultQuality);
-      if (url) {
-        return {
-          url,
-          source,
-          songId,
-          quality: config.defaultQuality,
-          matched: !trackSource || source !== trackSource,
-        };
+      // 在该来源上跨平台搜索匹配
+      const matched = await crossPlatformMatch(track, src);
+      if (matched && matched.source === src) {
+        songId = matched.songId;
+      } else {
+        logWarn(`候选源 ${src} 未匹配到: ${track.title} - ${track.artist}`);
+        continue;
       }
     }
+
+    const matched = !trackSource || src !== trackSource;
+
+    // 优先级 A：自定义音源脚本
+    if (descriptors.length > 0) {
+      const url = await resolveUrlWithCustomSource(descriptors, src, songId, config.defaultQuality);
+      if (url) {
+        logInfo(`自定义音源脚本解析成功(${src}): ${track.title} → ${url.substring(0, 80)}...`);
+        return { url, source: src, songId, quality: config.defaultQuality, matched };
+      }
+    }
+
+    // 优先级 B：外部洛雪 API
+    if (hasExternalApi) {
+      const url = await getMusicUrl(config, src, songId, config.defaultQuality);
+      if (url) {
+        logInfo(`外部洛雪 API 解析成功(${src}): ${track.title} → ${url.substring(0, 80)}...`);
+        return { url, source: src, songId, quality: config.defaultQuality, matched };
+      }
+    }
+
+    logWarn(`来源 ${src} 解析失败，尝试下一渠道: ${track.title}`);
   }
 
-  // 所有音源都失败，返回 null（调用方回退到 sourceData）
-  logInfo(`所有音源解析失败，将使用 sourceData: ${track.title}`);
+  // 所有渠道都失败，返回 null（调用方回退到 sourceData）
+  logWarn(`所有音源解析失败，将回退 sourceData: ${track.title}（若所有歌曲均如此，多半是音源后端不可用，请在设置中“测试音源连通性”确认）`);
   return null;
 }
 
@@ -489,52 +472,71 @@ export async function generateSourceData(
 }
 
 /**
- * 测试音源连通性
+ * 逐平台探测外部洛雪 API 的可用性（每个来源搜索+取链接）
  */
-export async function testLuoxueServer(config: PluginConfig): Promise<{ ok: boolean; message: string }> {
-  const customUrls = (config.customSourceUrls || [])
-    .map(u => u.trim())
-    .filter(u => u.length > 0);
+async function probeExternalApi(config: PluginConfig): Promise<PlatformStatus[]> {
+  const results: PlatformStatus[] = ALL_LX_SOURCES.map((s) => ({
+    source: s,
+    name: LX_SOURCE_NAMES[s],
+    status: 'unreachable' as const,
+  }));
+  const set = (src: LXSource, status: PlatformStatus['status'], reason?: string) => {
+    const r = results.find((x) => x.source === src);
+    if (r) { r.status = status; r.reason = reason; }
+  };
 
-  // 优先测试自定义音源脚本（实际加载并初始化）
-  if (customUrls.length > 0) {
-    const { testCustomSources } = await import('./lx-source');
-    return await testCustomSources(customUrls);
+  const PROBE_KEYWORD = '周杰伦 晴天';
+  for (const src of ALL_LX_SOURCES) {
+    try {
+      const found = await searchOnPlatform(PROBE_KEYWORD, src, 3);
+      if (!found || found.length === 0) {
+        set(src, 'fail', '搜索无结果');
+        continue;
+      }
+      const url = await getMusicUrl(config, src, found[0].songId, '128k');
+      if (url) set(src, 'ok');
+      else set(src, 'fail', '取URL失败（服务器可能不支持该来源或已停用）');
+    } catch (e) {
+      set(src, 'fail', `探测异常: ${String(e).slice(0, 60)}`);
+    }
+  }
+  return results;
+}
+
+/**
+ * 测试音源连通性（按平台返回可用状态，像洛雪音源插件一样逐源检测）
+ */
+export async function testLuoxueServer(
+  config: PluginConfig
+): Promise<{ ok: boolean; message: string; platforms?: PlatformStatus[] }> {
+  const customSources = (config.customSources || [])
+    .map((s) => ({ kind: s.kind, value: s.value, name: s.name || s.value }))
+    .filter((s) => s.value && s.value.length > 0);
+
+  // 优先测试自定义音源脚本（按平台探测每个来源的可用性）
+  if (customSources.length > 0) {
+    const descriptors: SourceDescriptor[] = customSources.map((s) => ({
+      name: s.name,
+      load: () => loadSourceContent(s),
+    }));
+    const platforms = await probePlatforms(descriptors);
+    const okCount = platforms.filter((p) => p.status === 'ok').length;
+    const ok = okCount > 0;
+    const msg = ok
+      ? `连通性检测：可用 ${okCount}/${platforms.length} 个来源`
+      : '所有来源取URL失败（音源后端可能不可用，请检查脚本硬编码的 API 地址）';
+    return { ok, message: msg, platforms };
   }
 
-  // 测试外部洛雪 API：用真实 /link 探测请求，避免根路径 404 误判
+  // 测试外部洛雪 API：逐平台探测
   if (config.luoxueApiUrl) {
-    try {
-      const probeUrl = buildApiUrl(config, 'kw', '3831661', '128k');
-      const resp = await fetchWithTimeout(probeUrl, {
-        method: 'GET',
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-      }, 10000);
-
-      if (resp.status === 200) {
-        const data = safeJsonParse(resp.body);
-        const got =
-          (data && (data.url || data.link)) ||
-          (data && typeof data.data === 'string' && data.data) ||
-          (data && data.data && (data.data.url || data.data.link));
-        if (got) {
-          return { ok: true, message: '洛雪音源服务器连接正常（已成功解析到链接）' };
-        }
-        return { ok: true, message: '洛雪音源服务器可达（探测曲目未返回链接，导入时以实际曲目为准）' };
-      }
-      if (resp.status === 401 || resp.status === 403) {
-        return { ok: false, message: '服务器需要访问密钥：请在设置中填写 luoxueApiPass' };
-      }
-      if (resp.status === 404) {
-        return {
-          ok: false,
-          message: '服务器可达但路由不匹配（地址应以 /link 或 /song/url/v1 结尾，或版本不符）',
-        };
-      }
-      return { ok: false, message: `服务器回应状态码: ${resp.status}` };
-    } catch (e) {
-      return { ok: false, message: `连接失败: 服务器地址不可达或已停用 (${String(e).slice(0, 120)})` };
-    }
+    const platforms = await probeExternalApi(config);
+    const okCount = platforms.filter((p) => p.status === 'ok').length;
+    const ok = okCount > 0;
+    const msg = ok
+      ? `外部 API 可达：可用 ${okCount}/${platforms.length} 个来源`
+      : '外部 API 所有来源取URL失败（地址或密钥可能不正确）';
+    return { ok, message: msg, platforms };
   }
 
   return { ok: true, message: '使用 Songloft 内置音源' };

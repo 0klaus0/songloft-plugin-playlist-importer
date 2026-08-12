@@ -742,6 +742,62 @@
       flex-shrink: 0;
     }
 
+    /* ==================== 音源平台状态网格 ==================== */
+    .platform-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px;
+      margin-top: 6px;
+    }
+    .pf-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-sm);
+      transition: border-color 0.2s;
+    }
+    .pf-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .pf-dot.ok { background: var(--success); box-shadow: 0 0 8px var(--success-soft); }
+    .pf-dot.fail { background: var(--error); box-shadow: 0 0 8px var(--error-soft); }
+    .pf-dot.unsupported { background: var(--text-muted); }
+    .pf-dot.unreachable { background: var(--warning); }
+    .pf-info { flex: 1; min-width: 0; }
+    .pf-name {
+      font-size: var(--font-size-sm);
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .pf-status {
+      font-size: var(--font-size-xs);
+      color: var(--text-muted);
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pf-item.ok .pf-status { color: var(--success); }
+    .pf-item.fail .pf-status { color: var(--error); }
+    .pf-item.unsupported .pf-status { color: var(--text-muted); }
+    .pf-item.unreachable .pf-status { color: var(--warning); }
+    .pf-empty {
+      padding: 14px;
+      text-align: center;
+      font-size: var(--font-size-xs);
+      color: var(--text-muted);
+      background: var(--bg-input);
+      border: 1px dashed var(--border-soft);
+      border-radius: var(--radius-sm);
+    }
+
     /* ==================== Toast ==================== */
     .toast {
       position: fixed;
@@ -979,10 +1035,10 @@
           <p class="hint" id="source-mode-hint">使用 Songloft 内置洛雪音源，无需单独部署 API 服务器（推荐）</p>
         </div>
 
-        <!-- 内置音源模式：自定义音源 URL 列表 + 选择音源平台 -->
+        <!-- 内置音源模式：自定义音源 URL 列表 + 上传脚本 + 选择音源平台 -->
         <div id="builtin-source-fields">
           <div class="form-group">
-            <label class="label">自定义音源</label>
+            <label class="label">自定义音源（URL）</label>
             <div id="source-list" class="source-list"></div>
             <div class="source-add-row">
               <input type="text" id="cfg-source-input" class="input" placeholder="粘贴洛雪音源脚本 URL...">
@@ -991,6 +1047,18 @@
               </button>
             </div>
             <p class="hint">添加洛雪音源脚本地址（.js），插件会自动加载并执行脚本解析音乐 URL。支持多个，按顺序尝试</p>
+          </div>
+
+          <div class="form-group">
+            <label class="label">自定义音源（上传本地脚本文件）</label>
+            <div class="source-add-row">
+              <input type="file" id="cfg-source-file" accept=".js,application/javascript,text/javascript" class="input" style="padding:8px;color:var(--text-secondary)">
+              <button id="btn-upload-source" class="btn-add" type="button" title="上传脚本">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+              </button>
+            </div>
+            <p class="hint">或上传本地 .js 音源脚本（与 URL 等价，存于插件本地存储，无需公网可访问）</p>
+            <div id="uploaded-list" class="source-list" style="margin-top:8px"></div>
           </div>
 
           <div class="form-group">
@@ -1053,6 +1121,17 @@
           </button>
         </div>
         <div id="test-result" class="test-result hidden"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+          </span>
+          <span class="card-title">音源平台状态</span>
+        </div>
+        <p class="hint">点上方“测试连接”后，这里按渠道显示每个来源是否可用（类似洛雪音源插件的逐源检测）。灰色=脚本未启用，红色=后端不可用，绿色=正常</p>
+        <div id="platform-grid" class="platform-grid"></div>
       </div>
 
       <div class="card">
@@ -1214,6 +1293,8 @@
     // ==================== 配置加载 ====================
     // 自定义音源 URL 列表（运行时状态）
     var sourceUrls = [];
+    // 已上传的本地脚本文件（运行时状态）：{ id, name }
+    var fileSources = [];
 
     function loadConfig() {
       api('/config', 'GET').then(function (res) {
@@ -1225,8 +1306,12 @@
         toggleSourceFields();
         if ($('cfg-url')) $('cfg-url').value = c.luoxueApiUrl || '';
         if ($('cfg-pass')) $('cfg-pass').value = c.luoxueApiPass || '';
-        sourceUrls = Array.isArray(c.customSourceUrls) ? c.customSourceUrls.slice() : [];
+        // 拆分 customSources 为 URL 列表与上传文件列表
+        var cs = Array.isArray(c.customSources) ? c.customSources : [];
+        sourceUrls = cs.filter(function (s) { return s.kind === 'url'; }).map(function (s) { return s.value; });
+        fileSources = cs.filter(function (s) { return s.kind === 'file'; }).map(function (s) { return { id: s.value, name: s.name }; });
         renderSourceList();
+        renderUploadedList();
         if ($('cfg-builtin-source')) $('cfg-builtin-source').value = c.defaultSearchSource || 'kw';
         if ($('cfg-external-source')) $('cfg-external-source').value = c.defaultSearchSource || 'kw';
         if ($('cfg-mode')) $('cfg-mode').value = c.importMode || 'stream';
@@ -1304,6 +1389,75 @@
       return sourceUrls.slice();
     }
 
+    // ==================== 已上传脚本管理 ====================
+    function renderUploadedList() {
+      var listEl = $('uploaded-list');
+      if (!listEl) return;
+      if (fileSources.length === 0) {
+        listEl.innerHTML = '<div class="source-empty">尚未上传本地脚本，选择一个 .js 文件上传</div>';
+        return;
+      }
+      var html = '';
+      for (var i = 0; i < fileSources.length; i++) {
+        html += '<div class="source-item">';
+        html += '<span class="source-num">' + (i + 1) + '</span>';
+        html += '<span class="source-url" title="' + escapeHtml(fileSources[i].name) + '">' + escapeHtml(fileSources[i].name) + '</span>';
+        html += '<button class="source-del" data-id="' + escapeHtml(fileSources[i].id) + '" type="button" title="删除">';
+        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>';
+        html += '</button>';
+        html += '</div>';
+      }
+      listEl.innerHTML = html;
+      var delBtns = listEl.querySelectorAll('.source-del');
+      for (var j = 0; j < delBtns.length; j++) {
+        (function (btn) {
+          btn.addEventListener('click', function () {
+            var id = btn.dataset.id;
+            api('/delete-source', 'POST', { id: id }).then(function () {
+              fileSources = fileSources.filter(function (f) { return f.id !== id; });
+              renderUploadedList();
+              showToast('已删除脚本');
+            }).catch(function (e) { showToast('删除失败: ' + e, 'error'); });
+          });
+        })(delBtns[j]);
+      }
+    }
+
+    if ($('btn-upload-source')) {
+      $('btn-upload-source').addEventListener('click', function () {
+        var input = $('cfg-source-file');
+        if (!input) return;
+        var file = input.files && input.files[0];
+        if (!file) { showToast('请先选择一个 .js 文件', 'error'); return; }
+        if (!/\.js$/i.test(file.name) && file.type !== 'application/javascript' && file.type !== 'text/javascript') {
+          showToast('请选择 .js 音源脚本文件', 'error');
+          return;
+        }
+        var btn = $('btn-upload-source');
+        btn.disabled = true;
+        // 以原始字节发送（不包裹 JSON）
+        fetch(API_BASE + '/upload-source?name=' + encodeURIComponent(file.name), {
+          method: 'POST',
+          body: file,
+        }).then(function (r) {
+          return r.text().then(function (text) {
+            if (!text) throw new Error('空响应');
+            return JSON.parse(text);
+          });
+        }).then(function (res) {
+          if (res.success) {
+            fileSources.push({ id: res.id, name: res.name });
+            renderUploadedList();
+            input.value = '';
+            showToast('脚本已上传: ' + res.name);
+          } else {
+            showToast('上传失败: ' + (res.error || '未知错误'), 'error');
+          }
+        }).catch(function (e) { showToast('上传失败: ' + e, 'error'); })
+          .finally(function () { btn.disabled = false; });
+      });
+    }
+
     // ==================== 音源模式切换 ====================
     function toggleSourceFields() {
       var builtinRadio = $('cfg-mode-builtin');
@@ -1343,11 +1497,19 @@
     if ($('btn-save-config')) {
       $('btn-save-config').addEventListener('click', function () {
         var useBuiltin = $('cfg-mode-builtin') ? $('cfg-mode-builtin').checked : true;
+        // 合并 URL 与上传文件为统一 customSources
+        var customSources = [];
+        for (var i = 0; i < sourceUrls.length; i++) {
+          customSources.push({ kind: 'url', value: sourceUrls[i], name: sourceUrls[i] });
+        }
+        for (var j = 0; j < fileSources.length; j++) {
+          customSources.push({ kind: 'file', value: fileSources[j].id, name: fileSources[j].name });
+        }
         var config = {
           useBuiltinSource: useBuiltin,
           luoxueApiUrl: useBuiltin ? '' : ($('cfg-url') ? $('cfg-url').value.trim() : ''),
           luoxueApiPass: useBuiltin ? '' : ($('cfg-pass') ? $('cfg-pass').value : ''),
-          customSourceUrls: getCustomSourceUrls(),
+          customSources: customSources,
           defaultSearchSource: getCurrentSearchSource(),
           defaultQuality: $('cfg-quality') ? $('cfg-quality').value : '320k',
         };
@@ -1389,11 +1551,18 @@
         hide(resultEl);
 
         var useBuiltin = $('cfg-mode-builtin') ? $('cfg-mode-builtin').checked : true;
+        var customSources = [];
+        for (var ci = 0; ci < sourceUrls.length; ci++) {
+          customSources.push({ kind: 'url', value: sourceUrls[ci], name: sourceUrls[ci] });
+        }
+        for (var cj = 0; cj < fileSources.length; cj++) {
+          customSources.push({ kind: 'file', value: fileSources[cj].id, name: fileSources[cj].name });
+        }
         var config = {
           useBuiltinSource: useBuiltin,
           luoxueApiUrl: useBuiltin ? '' : ($('cfg-url') ? $('cfg-url').value.trim() : ''),
           luoxueApiPass: useBuiltin ? '' : ($('cfg-pass') ? $('cfg-pass').value : ''),
-          customSourceUrls: getCustomSourceUrls(),
+          customSources: customSources,
           defaultSearchSource: getCurrentSearchSource(),
           defaultQuality: $('cfg-quality') ? $('cfg-quality').value : '320k',
         };
@@ -1408,6 +1577,7 @@
             resultEl.className = 'test-result fail';
             resultEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + escapeHtml(res.message || '连接失败');
           }
+          renderPlatformGrid(res.platforms);
         }).catch(function (e) {
           show(resultEl);
           resultEl.className = 'test-result fail';
@@ -1637,6 +1807,36 @@
         }).join('');
         if ($('platform-list')) $('platform-list').innerHTML = html;
       }).catch(function () { /* 忽略 */ });
+    }
+
+    // ==================== 渲染按平台状态网格 ====================
+    var PF_STATUS_TEXT = {
+      ok: '正常',
+      fail: '不可用',
+      unsupported: '未启用',
+      unreachable: '不可达',
+    };
+    function renderPlatformGrid(platforms) {
+      var grid = $('platform-grid');
+      if (!grid) return;
+      if (!platforms || platforms.length === 0) {
+        grid.innerHTML = '<div class="pf-empty">暂无检测数据，点“测试连接”后显示</div>';
+        return;
+      }
+      var html = '';
+      for (var i = 0; i < platforms.length; i++) {
+        var p = platforms[i];
+        var status = p.status || 'unreachable';
+        var statusText = PF_STATUS_TEXT[status] || status;
+        var reasonText = (status === 'fail' || status === 'unreachable') && p.reason ? p.reason : '';
+        html += '<div class="pf-item ' + status + '" title="' + escapeHtml(reasonText || statusText) + '">';
+        html += '<span class="pf-dot ' + status + '"></span>';
+        html += '<div class="pf-info">';
+        html += '<div class="pf-name">' + escapeHtml(p.name) + '</div>';
+        html += '<div class="pf-status">' + escapeHtml(reasonText || statusText) + '</div>';
+        html += '</div></div>';
+      }
+      grid.innerHTML = html;
     }
 
     // ==================== 初始化 ====================
