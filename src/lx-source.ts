@@ -693,6 +693,7 @@ async function requestMusicUrl(
           const errStack = data.stack ? ` | stack: ${data.stack.substring(0, 200)}` : '';
           const errName = data.name ? ` [${data.name}]` : '';
           logWarn(`音源解析失败: ${source}/${songId} - ${errName}${errMsg}${errStack}`);
+          logWarn(`提示：若所有歌曲都如此，多半是音源后端服务不可用（如 lxmusicapi.onrender.com 被停用），请检查音源脚本硬编码的 API 地址，或在设置中“测试音源连通性”`);
           return null;
         } catch (e) {
           logWarn(`音源错误解析失败: ${String(e)}`);
@@ -810,6 +811,27 @@ export async function cleanup(): Promise<void> {
 }
 
 /**
+ * 从音源脚本源码中提取可能的后端 URL，用于在“取URL失败”时提示用户
+ * 到底是哪个后端服务不可用（例如 huibq/latest.js 硬编码的
+ * https://lxmusicapi.onrender.com）。会过滤掉明显的仓库地址（github.com）。
+ */
+function extractBackendUrls(scriptText: string | undefined): string[] {
+  if (!scriptText) return [];
+  const urls = scriptText.match(/https?:\/\/[^\s"'`)>]+/g) || [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const u of urls) {
+    if (/github\.com/i.test(u)) continue;
+    const base = u.replace(/\/+$/, '');
+    if (!seen.has(base)) {
+      seen.add(base);
+      out.push(base);
+    }
+  }
+  return out;
+}
+
+/**
  * 测试音源脚本连通性
  *
  * @param scriptUrls 音源脚本 URL 列表
@@ -853,7 +875,11 @@ export async function testCustomSources(
         results.push(`#${i + 1} 正常 (${sources})`);
       } else {
         // 脚本能加载，但取不到 URL —— 通常是后端服务挂了
-        results.push(`#${i + 1} 能加载但取URL失败 (后端服务可能不可用)`);
+        const backendUrls = extractBackendUrls(scriptCache.get(urls[i]));
+        const hint = backendUrls.length > 0
+          ? `后端可能不可用 (${backendUrls.join(', ')})`
+          : '后端服务可能不可用（请检查音源脚本硬编码的 API 地址）';
+        results.push(`#${i + 1} 能加载但取URL失败 (${hint})`);
         allOk = false;
       }
     } catch (e) {

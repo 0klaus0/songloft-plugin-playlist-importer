@@ -161,12 +161,18 @@ async function streamTrack(
     return null;
   }
 
-  // 配置了音源但解析失败 → 报告错误，不创建无法播放的歌曲
-  if (hasCustomSource || hasExternalApi) {
-    logWarn(`音源解析失败，跳过: ${track.title}`);
-    progress.errors.push(`音源解析失败: ${track.title} - ${track.artist}`);
-    return null;
+  // 配置了音源但解析失败 → 回退到内置音源 sourceData，而非整首丢弃
+  logWarn(`音源解析失败，回退内置音源: ${track.title}`);
+  const sd = await generateSourceData(track, config);
+  if (sd) {
+    const songId = await createSongWithSourceData(track, sd);
+    if (songId) {
+      progress.importedSongs++;
+      return songId;
+    }
   }
+  progress.errors.push(`音源解析失败: ${track.title} - ${track.artist}`);
+  return null;
 
   // 未配置任何音源，回退到 sourceData
   logInfo(`无音源配置，使用 sourceData: ${track.title}`);
@@ -211,15 +217,9 @@ async function downloadTrack(
 
   // 直接 URL 解析失败
   if (!songId) {
-    // 配置了音源但解析失败 → 报告错误，不创建无法播放的歌曲
-    if (hasCustomSource || hasExternalApi) {
-      logWarn(`音源解析失败，跳过: ${track.title}`);
-      progress.errors.push(`音源解析失败: ${track.title} - ${track.artist}`);
-      return null;
-    }
-
-    // 未配置任何音源，回退到 sourceData
-    logInfo(`无音源配置，使用 sourceData: ${track.title}`);
+    // 直接 URL 解析失败 → 回退到内置音源 sourceData，而不是因单个死后端丢弃整首
+    logWarn(`音源解析失败，回退内置音源 sourceData: ${track.title}`);
+    logInfo(`使用 sourceData: ${track.title}`);
     const sourceData = await generateSourceData(track, config);
     if (!sourceData) {
       progress.errors.push(`无法匹配曲目: ${track.title} - ${track.artist}`);
@@ -355,8 +355,15 @@ export async function importPlaylist(
           url = result.url;
           logInfo(`URL 解析成功: ${track.title} → ${url.substring(0, 80)}...`);
         } else {
-          logWarn(`URL 解析失败: ${track.title}`);
-          progress.errors.push(`音源解析失败: ${track.title} - ${track.artist}`);
+          // 音源（自定义脚本 / 外部 API）解析失败。
+          // 典型根因：自定义音源后端服务不可用。
+          //   例如用户常用的 huibq/latest.js 硬编码后端 https://lxmusicapi.onrender.com，
+          //   该服务已被所有者停用（HTTP 503 Service Suspended），于是每首歌都取不到 URL。
+          // 旧逻辑：直接 push「音源解析失败」并整首跳过 → 一个死后端导致整批歌曲全部报废（用户看到的“解析歌曲失败”）。
+          // 新逻辑：回退到内置音源 sourceData，让 Songloft 继续尝试解析，至少保证歌单被导入而非全部失败。
+          logWarn(`音源解析失败，回退到内置音源: ${track.title}`);
+          progress.errors.push(`音源解析失败(已回退内置音源): ${track.title} - ${track.artist}`);
+          sourceData = await generateSourceData(track, config);
         }
       } else {
         // 无音源配置：生成 sourceData
