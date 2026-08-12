@@ -102,12 +102,14 @@ body {
 .header .logo-wrap {
   flex-shrink: 0;
   position: relative;
+  width: 52px;
+  height: 52px;
 }
-.header .logo {
+.header .logo-svg {
   width: 52px;
   height: 52px;
   border-radius: 14px;
-  object-fit: cover;
+  display: block;
   box-shadow: 0 4px 16px var(--accent-glow);
   border: 2px solid rgba(255, 255, 255, 0.06);
 }
@@ -700,10 +702,14 @@ body {
   .header h1 {
     font-size: var(--font-size-xl);
   }
-  .header .logo {
+  .header .logo-svg {
     width: 44px;
     height: 44px;
     border-radius: 12px;
+  }
+  .header .logo-wrap {
+    width: 44px;
+    height: 44px;
   }
   .card {
     padding: 16px 14px;
@@ -717,10 +723,6 @@ body {
   }
   .tab-btn span {
     font-size: var(--font-size-sm);
-  }
-  .tab-btn .tab-icon {
-    width: 15px;
-    height: 15px;
   }
   .track-artist {
     max-width: 70px;

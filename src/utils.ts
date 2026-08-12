@@ -131,8 +131,8 @@ export async function fetchWithTimeout(
 export function decodeHtmlEntities(text: string): string {
   const entities: Record<string, string> = {
     '&amp;': '&',
-    '&lt;': '<',
-    '&gt;': '>',
+    '<': '<',
+    '>': '>',
     '&quot;': '"',
     '&#39;': "'",
     '&apos;': "'",

@@ -407,7 +407,7 @@ export async function importPlaylist(
       // 原实现立即在并发 promise 中写入 progress.current/track/message，
       // 三个 promise 同时执行，赋值顺序取决于 microtask 调度，前端会看到
       // 闪烁的"23/68 歌名A" / "24/68 歌名B" 反复横跳。
-      // 修复：把进度写入推迟到「本任务真正的非同步操作之前」+ 「完成之后」，
+      // 修复：把进度写入推迟到「本任务真正的非异步操作之前」+ 「完成之后」，
       // 并在写之前检查是否已被同批前面的任务更新过，避免低编号被高编号覆盖。
       const reportProgress = (trackTitle: string) => {
         // 只有当进度计数器还指向更小的下标时，才推进到当前位置

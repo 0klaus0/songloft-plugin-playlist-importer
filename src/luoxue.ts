@@ -10,7 +10,7 @@
  * 通过搜索目标平台找到对应歌曲 ID，再获取下载链接。
  */
 /// <reference types="@songloft/plugin-sdk" />
-import { PluginConfig, TrackInfo, LXSource, PLATFORM_TO_LX, SearchResult, ALL_LX_SOURCES, PlatformStatus } from './types';
+import { PluginConfig, TrackInfo, LXSource, PLATFORM_TO_LX, SearchResult, ALL_LX_SOURCES, PlatformStatus, LX_SOURCE_NAMES } from './types';
 import { fetchWithTimeout } from './utils';
 import { searchMusic as searchOnPlatform } from './fetchers';
 import { resolveUrlWithCustomSource, loadSourceContent, getLoadedSupportedSources, probePlatforms, SourceDescriptor } from './lx-source';
