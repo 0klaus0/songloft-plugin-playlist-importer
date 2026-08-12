@@ -14,12 +14,12 @@
  * - 请求格式: { source, action: 'musicUrl', info: { type, musicInfo: { songmid } } }
  * - 响应格式: Promise<string>（解析为音乐 URL）
  *
- * ★ 并发安全：
- *   songloft.jsenv 子环境是**单事件流**的（events 列表按发生顺序追加）。
- *   原实现中阶段 2 并发调用 executeWait 时，3 个 promise 同时进入同一环境，
- *   会导致 musicUrl_result 事件互相错台（A 拿到 B 的事件，或超时）。
- *   修复：对 requestMusicUrl 增加**互斥锁（mutex）**，强制串行执行；
- *   initEnv 也加同一把锁，避免 envReady 标志位与 executeWait 不一致。
+ * ★ 关于并发与 jsenv 环境：
+ *   songloft.jsenv 子环境是单事件流的，同一时刻只应有一个请求活跃。
+ *   但本插件的阶段 1（预解析音源 URL）本身是**顺序执行**的，阶段 2 的
+ *   并发（songloft.songs.create / download）不再触碰 jsenv，因此
+ *   initEnv / requestMusicUrl 无需额外互斥锁即可安全运行。
+ *   （早期版本曾加 mutex 锁，实测反而导致取 URL 失败，已移除。）
  */
 /// <reference types="@songloft/plugin-sdk" />
 import { logInfo, logWarn, logError } from './logger';
@@ -41,36 +41,6 @@ let envReady = false;
 
 /** 上次初始化错误信息 */
 let lastInitError: string = '';
-
-/**
- * ★ 互斥锁：串行化所有 jsenv 操作
- *
- * 修复前：阶段 2 用 Promise.all(batch.map(requestMusicUrl))，3 个并发请求
- *        同时进入 executeWait 同一子环境，由于 jsenv 执行器的事件流无法区分
- *        调用者，会导致 musicUrl_result / musicUrl_error 互相错台、回调函数
- *        拿到别人家的结果（这才是 SyntaxError 的间接源头：请求方拿到错误的
- *        字符串后 JSON.parse 报错）。
- *
- * 修复后：所有 jsenv 操作（包括 initEnv 和 requestMusicUrl）共享一个
- *        promise 链式的 mutex 锁，确保同一时刻只有一个请求在子环境中活跃。
- */
-let mutexChain: Promise<void> = Promise.resolve();
-
-/**
- * 包裹一个异步操作进入互斥队列，确保串行执行。
- *
- * @param op 要串行执行的异步操作
- * @returns op 的返回值
- */
-function withMutex<T>(op: () => Promise<T>): Promise<T> {
-  const next = mutexChain.then(op, op);
-  // 用 catch 防止任意一个操作抛错后阻塞后续操作
-  mutexChain = next.then(
-    () => undefined,
-    () => undefined
-  );
-  return next;
-}
 
 /**
  * lx 全局对象的初始化代码（注入到 jsenv 子环境中）
@@ -482,14 +452,10 @@ async function downloadScript(url: string): Promise<string | null> {
 
 /**
  * 初始化 jsenv 环境并加载音源脚本
- *
- * 修复：包入互斥锁，确保和其他 jsenv 操作串行，
- *       避免 envReady 标志位在并发情况下被中途改写。
  */
 async function initEnv(scriptUrl: string): Promise<boolean> {
-  return withMutex(async () => {
-    // 如果已经加载了同一个脚本，直接返回
-    if (envReady && loadedScriptUrl === scriptUrl) {
+  // 如果已经加载了同一个脚本，直接返回
+  if (envReady && loadedScriptUrl === scriptUrl) {
       logInfo(`音源环境已就绪，复用现有环境: ${scriptUrl.substring(0, 60)}...`);
       return true;
     }
@@ -589,7 +555,6 @@ async function initEnv(scriptUrl: string): Promise<boolean> {
       lastInitError = `初始化失败: ${String(e)}`;
       return false;
     }
-  });
 }
 
 /**
@@ -657,19 +622,16 @@ function buildRequestCode(source: string, songId: string, quality: string): stri
 
 /**
  * 通过音源脚本请求音乐 URL
- *
- * 修复：包入互斥锁，强制串行执行（避免与同一 jsenv 子环境的并发请求错台）。
  */
 async function requestMusicUrl(
   source: string,
   songId: string,
   quality: string
 ): Promise<string | null> {
-  return withMutex(async () => {
-    if (!envReady) {
-      logWarn('音源环境未初始化');
-      return null;
-    }
+  if (!envReady) {
+    logWarn('音源环境未初始化');
+    return null;
+  }
 
     const requestCode = buildRequestCode(source, songId, quality);
 
@@ -746,14 +708,13 @@ async function requestMusicUrl(
       envReady = false;
       return null;
     }
-  });
 }
 
 /**
  * 使用自定义音源脚本解析音乐 URL
  *
- * 修复：本函数会进一步串行调用 initEnv/requestMusicUrl，
- *       由于内部已用互斥锁，外层即使在并发上下文中调用也是安全的。
+ * 阶段 1 顺序调用本函数，initEnv / requestMusicUrl 均为顺序执行，
+ * 无需额外互斥锁。
  */
 export async function resolveUrlWithCustomSource(
   customSourceUrls: string[],
@@ -793,7 +754,7 @@ export async function resolveUrlWithCustomSource(
     }
 
     // 初始化环境（如果尚未加载此脚本）
-    // 注意：initEnv 在切换脚本时会销毁旧环境，且已自带互斥锁
+    // 注意：initEnv 在切换脚本时会销毁旧环境
     const ok = await initEnv(scriptUrl);
     if (!ok) {
       logWarn(`音源脚本初始化失败，尝试下一个: ${scriptUrl}`);
@@ -836,18 +797,16 @@ export function isCustomSourceReady(): boolean {
  * 清理资源（销毁 jsenv）
  */
 export async function cleanup(): Promise<void> {
-  await withMutex(async () => {
-    if (envReady) {
-      try {
-        await songloft.jsenv.destroy(ENV_NAME);
-      } catch {
-        // 忽略
-      }
-      envReady = false;
-      loadedScriptUrl = null;
-      supportedSources = [];
+  if (envReady) {
+    try {
+      await songloft.jsenv.destroy(ENV_NAME);
+    } catch {
+      // 忽略
     }
-  });
+    envReady = false;
+    loadedScriptUrl = null;
+    supportedSources = [];
+  }
 }
 
 /**
