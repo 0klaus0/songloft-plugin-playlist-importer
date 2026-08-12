@@ -370,7 +370,7 @@ export async function resolveTrackUrl(
         matched: !trackSource || source !== trackSource,
       };
     }
-    logWarn(`自定义音源脚本解析失败: ${source}/${songId}`);
+    logWarn(`自定义音源脚本解析失败: ${source}/${songId}（若所有歌曲均如此，多半是音源后端服务不可用，请在设置中“测试音源连通性”确认）`);
   }
 
   // 优先级 2：外部洛雪 API

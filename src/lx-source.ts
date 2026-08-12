@@ -868,15 +868,33 @@ export async function testCustomSources(
   const results: string[] = [];
   let allOk = true;
 
+  // 探针：用一首稳定存在的酷我曲目（Justin Bieber - Beauty And A Beat）
+  // 真实发起一次取 URL 请求，而不仅仅是验证脚本能否加载。
+  // 目的：暴露「脚本能加载，但后端服务不可用」这类问题
+  // （例如 lxmusicapi.onrender.com 被所有者暂停，会返回 503，
+  //  单看 initEnv 成功会误导用户以为音源正常）。
+  const PROBE_SOURCE = 'kw';
+  const PROBE_SONG_ID = '3831661';
+
   for (let i = 0; i < urls.length; i++) {
     try {
       const ok = await initEnv(urls[i]);
-      if (ok) {
-        const sources = supportedSources.length > 0 ? supportedSources.join(',') : '全部';
+      if (!ok) {
+        const err = lastInitError || '未知错误';
+        results.push(`#${i + 1} 加载失败 (${err.substring(0, 40)})`);
+        allOk = false;
+        continue;
+      }
+
+      const sources = supportedSources.length > 0 ? supportedSources.join(',') : '全部';
+
+      // 真实探测一次 URL 解析能力
+      const probeUrl = await requestMusicUrl(PROBE_SOURCE, PROBE_SONG_ID, '128k');
+      if (probeUrl) {
         results.push(`#${i + 1} 正常 (${sources})`);
       } else {
-        const err = lastInitError || '未知错误';
-        results.push(`#${i + 1} 失败 (${err.substring(0, 40)})`);
+        // 脚本能加载，但取不到 URL —— 通常是后端服务挂了
+        results.push(`#${i + 1} 能加载但取URL失败 (后端服务可能不可用)`);
         allOk = false;
       }
     } catch (e) {
