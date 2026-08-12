@@ -29,15 +29,33 @@ export interface LuoxueResult {
  * 构建 API 请求 URL（自动适配不同服务器格式）
  */
 function buildApiUrl(config: PluginConfig, source: LXSource, songId: string, quality: string): string {
-  const base = config.luoxueApiUrl.replace(/\/+$/, '');
-  // lx-source (Go) 格式: /link/:s/:id/:q
-  if (base.includes('/link/') || config.luoxueApiUrl.includes('lx-source')) {
-    return `${base}/link/${source}/${songId}/${quality}`;
+  const raw = config.luoxueApiUrl.replace(/\/+$/, '');
+  const keySuffix = config.luoxueApiPass
+    ? `?key=${encodeURIComponent(config.luoxueApiPass)}`
+    : '';
+
+  // 情况 A：已包含 /link 路由（新版 lx-music-api-server / Go lx-source）
+  // 去掉末尾的 /link 再统一拼 /:source/:id/:quality，避免双重 /link
+  const linkIdx = raw.toLowerCase().lastIndexOf('/link');
+  if (linkIdx !== -1) {
+    const prefix = raw.slice(0, linkIdx);
+    return `${prefix}/link/${source}/${songId}/${quality}${keySuffix}`;
   }
-  // 通用格式: /url?source=&id=&quality=
-  const sep = base.includes('?') ? '&' : '?';
+  // 显式以 lx-source 标识的服务器，按 /link 路径拼接
+  if (/lx-source/i.test(config.luoxueApiUrl)) {
+    return `${raw}/link/${source}/${songId}/${quality}${keySuffix}`;
+  }
+
+  // 情况 B：旧版 lx-music-api-server 的 /song/url(/v1) 路由
+  const songUrlMatch = raw.match(/^(.*?\/song\/url)(?:\/v1)?\/?$/i);
+  if (songUrlMatch) {
+    return `${songUrlMatch[1]}/v1/${source}/${songId}/${quality}${keySuffix}`;
+  }
+
+  // 情况 C：通用 query 格式: /?source=&id=&quality=
+  const sep = raw.includes('?') ? '&' : '?';
   const params = `source=${source}&id=${songId}&quality=${quality}`;
-  let url = `${base}${sep}${params}`;
+  let url = `${raw}${sep}${params}`;
   if (config.luoxueApiPass) {
     url += `&key=${encodeURIComponent(config.luoxueApiPass)}`;
   }
@@ -185,7 +203,9 @@ export async function getMusicUrl(
     }, 15000);
 
     if (resp.status !== 200) {
-      logWarn(`洛雪音源回应状态码: ${resp.status}`);
+      let host = '';
+      try { host = new URL(url).host; } catch { /* ignore */ }
+      logWarn(`洛雪音源回应状态码: ${resp.status}${host ? ` (${host})` : ''}`);
       return null;
     }
 
@@ -482,21 +502,38 @@ export async function testLuoxueServer(config: PluginConfig): Promise<{ ok: bool
     return await testCustomSources(customUrls);
   }
 
-  // 测试外部洛雪 API
+  // 测试外部洛雪 API：用真实 /link 探测请求，避免根路径 404 误判
   if (config.luoxueApiUrl) {
     try {
-      const base = config.luoxueApiUrl.replace(/\/+$/, '');
-      const resp = await fetchWithTimeout(base, {
+      const probeUrl = buildApiUrl(config, 'kw', '3831661', '128k');
+      const resp = await fetchWithTimeout(probeUrl, {
         method: 'GET',
         headers: { 'User-Agent': 'Mozilla/5.0' },
-      }, 8000);
+      }, 10000);
 
       if (resp.status === 200) {
-        return { ok: true, message: '洛雪音源服务器连接正常' };
+        const data = safeJsonParse(resp.body);
+        const got =
+          (data && (data.url || data.link)) ||
+          (data && typeof data.data === 'string' && data.data) ||
+          (data && data.data && (data.data.url || data.data.link));
+        if (got) {
+          return { ok: true, message: '洛雪音源服务器连接正常（已成功解析到链接）' };
+        }
+        return { ok: true, message: '洛雪音源服务器可达（探测曲目未返回链接，导入时以实际曲目为准）' };
+      }
+      if (resp.status === 401 || resp.status === 403) {
+        return { ok: false, message: '服务器需要访问密钥：请在设置中填写 luoxueApiPass' };
+      }
+      if (resp.status === 404) {
+        return {
+          ok: false,
+          message: '服务器可达但路由不匹配（地址应以 /link 或 /song/url/v1 结尾，或版本不符）',
+        };
       }
       return { ok: false, message: `服务器回应状态码: ${resp.status}` };
     } catch (e) {
-      return { ok: false, message: `连接失败: ${String(e)}` };
+      return { ok: false, message: `连接失败: 服务器地址不可达或已停用 (${String(e).slice(0, 120)})` };
     }
   }
 
