@@ -25,7 +25,7 @@ import { fetchPlaylist } from './fetchers';
 import { testLuoxueServer } from './luoxue';
 import { importPlaylist } from './songloft-api';
 import { getLogs, clearLogs, restoreLogs, logInfo, logWarn, logError } from './logger';
-import { loadSourceContent, extractSourceMetadata } from './lx-source';
+import { loadSourceContent, extractSourceMetadata, testSingleSource, SourceDescriptor } from './lx-source';
 
 const router = createRouter();
 
@@ -308,6 +308,27 @@ router.post('/api/sources/delete', async (req) => {
   configCache = config;
   logInfo(`已删除音源: ${removed.name || removed.value}`);
   return jsonResponse({ success: true, message: '已删除' });
+});
+
+/** POST /api/sources/test — 测试单个音源（逐平台返回状态，类似洛雪音源插件逐源检测） */
+router.post('/api/sources/test', async (req) => {
+  const body = parseBody<{ index?: number }>(req.body);
+  const idx = body.index;
+  if (typeof idx !== 'number' || idx < 0) return errorResponse('缺少有效的音源索引');
+
+  const config = await getConfig();
+  const sources = config.customSources || [];
+  if (idx >= sources.length) return errorResponse('音源索引越界');
+
+  const s = sources[idx];
+  const desc: SourceDescriptor = {
+    name: s.name || s.value,
+    load: () => loadSourceContent(s),
+  };
+  logInfo(`开始测试音源: ${s.name || s.value}`);
+  const result = await testSingleSource(desc);
+  logInfo(`音源测试完成: ${result.message}`);
+  return jsonResponse({ success: true, ok: result.ok, message: result.message, platforms: result.statuses, sourceIndex: idx });
 });
 
 /** POST /api/parse — 解析分享链接 */

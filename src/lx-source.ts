@@ -791,31 +791,61 @@ export async function testCustomSources(sources: SourceDescriptor[]): Promise<{ 
 }
 
 /**
- * 按平台探测每个来源是否可用（像洛雪音源插件一样逐源检测）
+ * 测试单个音源脚本：加载、初始化，并逐平台探测可用性（像洛雪音源插件一样逐源检测）
+ *
+ * @param desc 单个音源描述符
+ * @returns 各平台状态 + 汇总消息
  */
-export async function probePlatforms(sources: SourceDescriptor[]): Promise<PlatformStatus[]> {
-  const results: PlatformStatus[] = ALL_LX_SOURCES.map((s) => ({ source: s, name: LX_SOURCE_NAMES[s], status: 'unreachable' as const }));
-  const set = (src: LXSource, status: PlatformStatus['status'], reason?: string) => { const r = results.find((x) => x.source === src); if (r) { r.status = status; r.reason = reason; } };
-  const valid = sources.filter((s) => s && s.name);
-  if (valid.length === 0) return results;
-  const first = valid[0];
-  const code = await first.load();
-  if (!code) { for (const r of results) { r.status = 'unreachable'; r.reason = '脚本加载失败'; } return results; }
-  scriptCache.set(first.name, code);
-  const ok = await initEnv(code, first.name);
-  if (!ok) { for (const r of results) { r.status = 'unreachable'; r.reason = '脚本初始化失败'; } return results; }
+export async function testSingleSource(desc: SourceDescriptor): Promise<{ statuses: PlatformStatus[]; message: string; ok: boolean }> {
+  const statuses: PlatformStatus[] = ALL_LX_SOURCES.map((s) => ({ source: s, name: LX_SOURCE_NAMES[s], status: 'unreachable' as const }));
+  const set = (src: LXSource, status: PlatformStatus['status'], reason?: string) => { const r = statuses.find((x) => x.source === src); if (r) { r.status = status; r.reason = reason; } };
+
+  const code = await desc.load();
+  if (!code) {
+    for (const r of statuses) { r.status = 'unreachable'; r.reason = '脚本加载失败'; }
+    return { statuses, message: '脚本加载失败，请检查 URL 或上传文件', ok: false };
+  }
+  scriptCache.set(desc.name, code);
+  const ok = await initEnv(code, desc.name);
+  if (!ok) {
+    const err = lastInitError || '未知错误';
+    for (const r of statuses) { r.status = 'unreachable'; r.reason = '脚本初始化失败'; }
+    return { statuses, message: `脚本初始化失败: ${err.substring(0, 80)}`, ok: false };
+  }
   const supported = supportedSources.length > 0 ? supportedSources : ALL_LX_SOURCES;
   const PROBE_KEYWORD = '周杰伦 晴天';
+  let okCount = 0;
+  let testedCount = 0;
   for (const src of ALL_LX_SOURCES) {
     if (!supported.includes(src)) { set(src, 'unsupported', '脚本未启用该来源'); continue; }
+    testedCount++;
     try {
       const found = await searchOnPlatform(PROBE_KEYWORD, src, 3);
       if (!found || found.length === 0) { set(src, 'fail', '搜索无结果'); continue; }
       const id = found[0].songId;
       const url = await requestMusicUrl(src, id, '128k');
-      if (url) set(src, 'ok');
-      else { const backendUrls = extractBackendUrls(code); set(src, 'fail', backendUrls.length > 0 ? `取URL失败（后端可能不可用: ${backendUrls.join(', ')}）` : '取URL失败（后端可能不可用）'); }
+      if (url) { set(src, 'ok'); okCount++; }
+      else {
+        const backendUrls = extractBackendUrls(code);
+        set(src, 'fail', backendUrls.length > 0 ? `取URL失败（后端可能不可用: ${backendUrls.join(', ')}）` : '取URL失败（后端可能不可用）');
+      }
     } catch (e) { set(src, 'fail', `探测异常: ${String(e).slice(0, 60)}`); }
   }
-  return results;
+  const msg = okCount > 0
+    ? `连通性检测：可用 ${okCount}/${testedCount} 个来源`
+    : '所有来源取URL失败（音源后端可能不可用，请检查脚本硬编码的 API 地址）';
+  return { statuses, message: msg, ok: okCount > 0 };
+}
+
+/**
+ * 按平台探测每个来源是否可用（像洛雪音源插件一样逐源检测）
+ * 使用第一个启用的音源脚本进行探测。
+ */
+export async function probePlatforms(sources: SourceDescriptor[]): Promise<PlatformStatus[]> {
+  const valid = sources.filter((s) => s && s.name);
+  if (valid.length === 0) {
+    return ALL_LX_SOURCES.map((s) => ({ source: s, name: LX_SOURCE_NAMES[s], status: 'unreachable' as const, reason: '未配置音源脚本' }));
+  }
+  const result = await testSingleSource(valid[0]);
+  return result.statuses;
 }

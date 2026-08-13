@@ -846,6 +846,41 @@ body {
   background: rgba(248, 113, 113, 0.15);
   color: #f87171;
 }
+.source-test {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.source-test svg {
+  width: 17px;
+  height: 17px;
+}
+.source-test:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.source-test.testing {
+  color: var(--accent);
+  cursor: wait;
+}
+.source-card.src-ok {
+  border-color: rgba(52, 211, 153, 0.5);
+}
+.source-card.src-fail {
+  border-color: rgba(248, 113, 113, 0.5);
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
 /* ==================== 平台状态网格 ==================== */
 .platform-grid {

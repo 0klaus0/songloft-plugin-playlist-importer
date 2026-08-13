@@ -156,6 +156,7 @@
       }
       html += '</div>';
       html += '<div class="source-ctrl">';
+      html += '<button class="source-test" data-index="' + i + '" type="button" title="测试该音源"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg></button>';
       html += '<button class="source-toggle' + (enabled ? ' on' : '') + '" data-index="' + i + '" type="button" title="' + (enabled ? '点击禁用' : '点击启用') + '"></button>';
       html += '<button class="source-del" data-index="' + i + '" type="button" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>';
       html += '</div>';
@@ -203,6 +204,16 @@
           }).catch(function (e) { showToast('删除失败: ' + e, 'error'); });
         });
       })(dels[j]);
+    }
+    // 单源测试
+    var tests = listEl.querySelectorAll('.source-test');
+    for (var t = 0; t < tests.length; t++) {
+      (function (btn) {
+        btn.addEventListener('click', function () {
+          var idx = parseInt(btn.dataset.index, 10);
+          testSingleSource(idx, btn);
+        });
+      })(tests[t]);
     }
     // 拖拽排序
     var cards = listEl.querySelectorAll('.source-card');
@@ -699,6 +710,41 @@
       html += '</div></div>';
     }
     grid.innerHTML = html;
+  }
+
+  // 单源测试：调用后端测试指定音源，并把结果渲染到平台状态网格
+  function testSingleSource(idx, btn) {
+    if (!btn) return;
+    var originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.classList.add('testing');
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 11-6.22-8.56"/></svg>';
+    api('/sources/test', 'POST', { index: idx }).then(function (res) {
+      var resultEl = $('test-result');
+      if (resultEl) {
+        show(resultEl);
+        if (res.ok) {
+          resultEl.className = 'test-result success';
+          resultEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>' + escapeHtml(res.message || '连接正常');
+        } else {
+          resultEl.className = 'test-result fail';
+          resultEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + escapeHtml(res.message || '连接失败');
+        }
+      }
+      renderPlatformGrid(res.platforms);
+      // 在源卡片上标记测试结果
+      var card = btn.closest('.source-card');
+      if (card) {
+        card.classList.remove('src-ok', 'src-fail');
+        card.classList.add(res.ok ? 'src-ok' : 'src-fail');
+      }
+    }).catch(function (e) {
+      showToast('测试失败: ' + e, 'error');
+    }).finally(function () {
+      btn.disabled = false;
+      btn.classList.remove('testing');
+      btn.innerHTML = originalHtml;
+    });
   }
 
   // ==================== 初始化 ====================
