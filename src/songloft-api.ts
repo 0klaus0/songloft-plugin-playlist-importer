@@ -33,6 +33,49 @@ async function createPlaylist(name: string): Promise<number> {
 }
 
 /**
+ * 查找同名歌单（用于重复导入时复用，避免创建重复歌单）
+ */
+async function findExistingPlaylist(name: string): Promise<Playlist | null> {
+  try {
+    const playlists = await songloft.playlists.search(name);
+    for (const p of playlists) {
+      if (p.name === name) return p;
+    }
+  } catch (e) {
+    logWarn(`搜索已有歌单失败: ${String(e)}`);
+  }
+  return null;
+}
+
+/**
+ * 获取歌单内所有歌曲（用于增量导入判断）
+ */
+async function getPlaylistSongs(playlistId: number): Promise<Song[]> {
+  try {
+    return await songloft.playlists.getSongs(playlistId, { limit: 10000 });
+  } catch (e) {
+    logWarn(`获取歌单歌曲失败: ${String(e)}`);
+    return [];
+  }
+}
+
+/**
+ * 判断歌曲是否已在歌单中（按标题+艺术家匹配）
+ */
+function isSongInPlaylist(track: TrackInfo, songs: Song[]): boolean {
+  const tTitle = track.title.toLowerCase();
+  const tArtist = track.artist.toLowerCase();
+  for (const s of songs) {
+    const title = (s.title || '').toLowerCase();
+    const artist = (s.artist || '').toLowerCase();
+    const titleMatch = title === tTitle || title.includes(tTitle) || tTitle.includes(title);
+    const artistMatch = artist === '' || artist.includes(tArtist) || tArtist.includes(artist) || track.artist === '未知艺术家';
+    if (titleMatch && artistMatch) return true;
+  }
+  return false;
+}
+
+/**
  * 将歌曲加入歌单
  */
 async function addSongsToPlaylist(
@@ -304,12 +347,21 @@ export async function importPlaylist(
   progress.resolveTotal = playlist.tracks.length;
   progress.resolveCurrent = 0;
 
-  // 创建 Songloft 歌单
+  // 创建或复用 Songloft 歌单（重复导入时复用同名歌单，实现增量导入）
   const playlistName = `[导入] ${playlist.name}`;
-  logInfo(`创建 Songloft 歌单: ${playlistName}`);
+  logInfo(`查找或创建 Songloft 歌单: ${playlistName}`);
   let playlistId: number;
+  let existingPlaylistSongs: Song[] = [];
   try {
-    playlistId = await createPlaylist(playlistName);
+    const existing = await findExistingPlaylist(playlistName);
+    if (existing) {
+      playlistId = existing.id;
+      logInfo(`发现已有同名歌单，复用: ${playlistName} (id=${playlistId})`);
+      existingPlaylistSongs = await getPlaylistSongs(playlistId);
+      progress.message = `发现已有歌单「${playlistName}」，仅导入缺失歌曲`;
+    } else {
+      playlistId = await createPlaylist(playlistName);
+    }
   } catch (e) {
     progress.status = 'error';
     progress.message = `创建歌单失败: ${String(e)}`;
@@ -336,7 +388,14 @@ export async function importPlaylist(
     logInfo(`解析 ${i + 1}/${playlist.tracks.length}: ${track.title}`);
 
     try {
-      // 先检查曲库中是否已有此歌曲
+      // 若复用已有歌单，先检查歌曲是否已在歌单中（增量导入）
+      if (existingPlaylistSongs.length > 0 && isSongInPlaylist(track, existingPlaylistSongs)) {
+        logInfo(`歌单已有此歌曲，跳过: ${track.title} - ${track.artist}`);
+        progress.importedSongs++;
+        continue;
+      }
+
+      // 再检查曲库中是否已有此歌曲
       const existingId = await findExistingSong(track);
       if (existingId) {
         logInfo(`曲库已有此歌曲: ${track.title} (id=${existingId})`);

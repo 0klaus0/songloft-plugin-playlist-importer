@@ -176,8 +176,13 @@ body {
   overflow: hidden;
 }
 .tab-btn .tab-icon {
-  width: 17px;
-  height: 17px;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.tab-btn svg {
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
 }
 .tab-btn:hover {
