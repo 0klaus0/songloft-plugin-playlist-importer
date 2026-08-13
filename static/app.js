@@ -94,10 +94,8 @@
   }
 
   // ==================== 配置加载 ====================
-  // 自定义音源 URL 列表（运行时状态）
-  var sourceUrls = [];
-  // 已上传的本地脚本文件（运行时状态）：{ id, name }
-  var fileSources = [];
+  // 自定义音源列表（运行时状态）：[{ index, kind, value, name, enabled, author, version, description, platforms }]
+  var sources = [];
 
   function loadConfig() {
     api('/config', 'GET').then(function (res) {
@@ -109,12 +107,6 @@
       toggleSourceFields();
       if ($('cfg-url')) $('cfg-url').value = c.luoxueApiUrl || '';
       if ($('cfg-pass')) $('cfg-pass').value = c.luoxueApiPass || '';
-      // 拆分 customSources 为 URL 列表与上传文件列表
-      var cs = Array.isArray(c.customSources) ? c.customSources : [];
-      sourceUrls = cs.filter(function (s) { return s.kind === 'url'; }).map(function (s) { return s.value; });
-      fileSources = cs.filter(function (s) { return s.kind === 'file'; }).map(function (s) { return { id: s.value, name: s.name }; });
-      renderSourceList();
-      renderUploadedList();
       if ($('cfg-builtin-source')) $('cfg-builtin-source').value = c.defaultSearchSource || 'kw';
       if ($('cfg-external-source')) $('cfg-external-source').value = c.defaultSearchSource || 'kw';
       if ($('cfg-mode')) $('cfg-mode').value = c.importMode || 'stream';
@@ -122,38 +114,154 @@
     }).catch(function (e) { console.error('加载配置失败:', e); });
   }
 
-  // ==================== 音源列表管理 ====================
+  // ==================== 自定义源管理 ====================
+  var PLATFORM_SHORT = { kw: '酷我', kg: '酷狗', tx: 'QQ', wy: '网易', mg: '咪咕' };
+
+  function loadSources() {
+    api('/sources', 'GET').then(function (res) {
+      if (res.success && Array.isArray(res.sources)) {
+        sources = res.sources;
+        renderSourceList();
+      }
+    }).catch(function (e) { console.error('加载音源失败:', e); });
+  }
+
   function renderSourceList() {
-    var listEl = $('source-list');
+    var listEl = $('source-manage-list');
     if (!listEl) return;
-    if (sourceUrls.length === 0) {
-      listEl.innerHTML = '<div class="source-empty">暂无自定义音源，在下方添加</div>';
+    if (sources.length === 0) {
+      listEl.innerHTML = '<div class="source-empty">暂无自定义音源，点击上方按钮添加</div>';
       return;
     }
     var html = '';
-    for (var i = 0; i < sourceUrls.length; i++) {
-      html += '<div class="source-item">';
-      html += '<span class="source-num">' + (i + 1) + '</span>';
-      html += '<span class="source-url" title="' + escapeHtml(sourceUrls[i]) + '">' + escapeHtml(sourceUrls[i]) + '</span>';
-      html += '<button class="source-del" data-idx="' + i + '" type="button" title="删除">';
-      html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>';
-      html += '</button>';
+    for (var i = 0; i < sources.length; i++) {
+      var s = sources[i];
+      var enabled = s.enabled !== false;
+      var name = s.name || (s.kind === 'url' ? s.value : '上传脚本');
+      html += '<div class="source-card' + (enabled ? '' : ' disabled') + '" data-index="' + i + '">';
+      html += '<span class="source-drag" title="拖拽排序"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg></span>';
+      html += '<div class="source-card-body">';
+      html += '<div class="source-name" title="' + escapeHtml(s.kind === 'url' ? s.value : name) + '">' + escapeHtml(name) + '</div>';
+      html += '<div class="source-meta">';
+      if (s.author) html += '<span class="src-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' + escapeHtml(s.author) + '</span>';
+      if (s.version) html += '<span class="src-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>v' + escapeHtml(s.version) + '</span>';
+      if (s.kind === 'file') html += '<span class="src-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>本地脚本</span>';
+      html += '</div>';
+      if (s.platforms && s.platforms.length > 0) {
+        html += '<div class="source-platforms">';
+        for (var p = 0; p < s.platforms.length; p++) {
+          html += '<span class="source-platform-badge">' + escapeHtml(PLATFORM_SHORT[s.platforms[p]] || s.platforms[p]) + '</span>';
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+      html += '<div class="source-ctrl">';
+      html += '<button class="source-toggle' + (enabled ? ' on' : '') + '" data-index="' + i + '" type="button" title="' + (enabled ? '点击禁用' : '点击启用') + '"></button>';
+      html += '<button class="source-del" data-index="' + i + '" type="button" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>';
+      html += '</div>';
       html += '</div>';
     }
     listEl.innerHTML = html;
-    // 绑定删除按钮
-    var delBtns = listEl.querySelectorAll('.source-del');
-    for (var j = 0; j < delBtns.length; j++) {
+    bindSourceEvents(listEl);
+  }
+
+  function bindSourceEvents(listEl) {
+    // 启用/禁用
+    var toggles = listEl.querySelectorAll('.source-toggle');
+    for (var i = 0; i < toggles.length; i++) {
       (function (btn) {
         btn.addEventListener('click', function () {
-          var idx = parseInt(btn.dataset.idx, 10);
-          sourceUrls.splice(idx, 1);
-          renderSourceList();
+          var idx = parseInt(btn.dataset.index, 10);
+          var s = sources[idx];
+          if (!s) return;
+          var newEnabled = !(s.enabled !== false);
+          api('/sources/toggle', 'POST', { index: idx, enabled: newEnabled }).then(function (res) {
+            if (res.success) {
+              s.enabled = newEnabled;
+              renderSourceList();
+            } else {
+              showToast(res.error || '操作失败', 'error');
+            }
+          }).catch(function (e) { showToast('操作失败: ' + e, 'error'); });
         });
-      })(delBtns[j]);
+      })(toggles[i]);
+    }
+    // 删除
+    var dels = listEl.querySelectorAll('.source-del');
+    for (var j = 0; j < dels.length; j++) {
+      (function (btn) {
+        btn.addEventListener('click', function () {
+          var idx = parseInt(btn.dataset.index, 10);
+          if (!window.confirm('确定删除该音源？')) return;
+          api('/sources/delete', 'POST', { index: idx }).then(function (res) {
+            if (res.success) {
+              showToast('已删除');
+              loadSources();
+            } else {
+              showToast(res.error || '删除失败', 'error');
+            }
+          }).catch(function (e) { showToast('删除失败: ' + e, 'error'); });
+        });
+      })(dels[j]);
+    }
+    // 拖拽排序
+    var cards = listEl.querySelectorAll('.source-card');
+    var dragIndex = null;
+    for (var k = 0; k < cards.length; k++) {
+      (function (card) {
+        card.setAttribute('draggable', 'true');
+        card.addEventListener('dragstart', function (e) {
+          dragIndex = parseInt(card.dataset.index, 10);
+          card.classList.add('dragging');
+          try { e.dataTransfer.effectAllowed = 'move'; } catch (err) {}
+        });
+        card.addEventListener('dragend', function () {
+          card.classList.remove('dragging');
+        });
+        card.addEventListener('dragover', function (e) {
+          e.preventDefault();
+          try { e.dataTransfer.dropEffect = 'move'; } catch (err) {}
+        });
+        card.addEventListener('drop', function (e) {
+          e.preventDefault();
+          if (dragIndex === null) return;
+          var targetIndex = parseInt(card.dataset.index, 10);
+          if (dragIndex === targetIndex) { renderSourceList(); return; }
+          var moved = sources.splice(dragIndex, 1)[0];
+          sources.splice(targetIndex, 0, moved);
+          var order = sources.map(function (s) { return s.index; });
+          api('/sources/reorder', 'POST', { order: order }).then(function (res) {
+            if (!res.success) showToast(res.error || '排序保存失败', 'error');
+            loadSources();
+          }).catch(function () { loadSources(); });
+        });
+      })(cards[k]);
     }
   }
 
+  // 当前音源列表（用于保存配置）
+  function currentCustomSources() {
+    return sources.map(function (s) {
+      return { kind: s.kind, value: s.value, name: s.name };
+    });
+  }
+
+  // URL 导入面板开关
+  if ($('btn-url-import')) {
+    $('btn-url-import').addEventListener('click', function () {
+      var panel = $('url-import-panel');
+      if (!panel) return;
+      if (panel.classList.contains('hidden')) {
+        show(panel);
+        var input = $('cfg-source-input');
+        if (input) input.focus();
+      } else {
+        hide(panel);
+      }
+    });
+  }
+
+  // 添加 URL 音源
   if ($('btn-add-source')) {
     $('btn-add-source').addEventListener('click', function () {
       addSourceUrl();
@@ -173,61 +281,28 @@
     if (!input) return;
     var url = input.value.trim();
     if (!url) { showToast('请输入音源 URL', 'error'); return; }
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    if (!/^https?:\/\//i.test(url)) {
       showToast('URL 必须以 http:// 或 https:// 开头', 'error');
       return;
     }
-    // 去重
-    if (sourceUrls.indexOf(url) >= 0) {
-      showToast('该音源已存在', 'error');
-      return;
-    }
-    sourceUrls.push(url);
-    input.value = '';
-    renderSourceList();
-    showToast('音源已添加');
+    var btn = $('btn-add-source');
+    if (btn) btn.disabled = true;
+    api('/sources/add-url', 'POST', { url: url }).then(function (res) {
+      if (res.success) {
+        input.value = '';
+        hide($('url-import-panel'));
+        showToast('音源已添加');
+        loadSources();
+      } else {
+        showToast(res.error || '添加失败', 'error');
+      }
+    }).catch(function (e) { showToast('添加失败: ' + e, 'error'); })
+      .finally(function () { if (btn) btn.disabled = false; });
   }
 
-  function getCustomSourceUrls() {
-    return sourceUrls.slice();
-  }
-
-  // ==================== 已上传脚本管理 ====================
-  function renderUploadedList() {
-    var listEl = $('uploaded-list');
-    if (!listEl) return;
-    if (fileSources.length === 0) {
-      listEl.innerHTML = '<div class="source-empty">尚未上传本地脚本，选择一个 .js 文件上传</div>';
-      return;
-    }
-    var html = '';
-    for (var i = 0; i < fileSources.length; i++) {
-      html += '<div class="source-item">';
-      html += '<span class="source-num">' + (i + 1) + '</span>';
-      html += '<span class="source-url" title="' + escapeHtml(fileSources[i].name) + '">' + escapeHtml(fileSources[i].name) + '</span>';
-      html += '<button class="source-del" data-id="' + escapeHtml(fileSources[i].id) + '" type="button" title="删除">';
-      html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>';
-      html += '</button>';
-      html += '</div>';
-    }
-    listEl.innerHTML = html;
-    var delBtns = listEl.querySelectorAll('.source-del');
-    for (var j = 0; j < delBtns.length; j++) {
-      (function (btn) {
-        btn.addEventListener('click', function () {
-          var id = btn.dataset.id;
-          api('/delete-source', 'POST', { id: id }).then(function () {
-            fileSources = fileSources.filter(function (f) { return f.id !== id; });
-            renderUploadedList();
-            showToast('已删除脚本');
-          }).catch(function (e) { showToast('删除失败: ' + e, 'error'); });
-        });
-      })(delBtns[j]);
-    }
-  }
-
-  if ($('btn-upload-source')) {
-    $('btn-upload-source').addEventListener('click', function () {
+  // 上传脚本文件
+  if ($('btn-upload-script')) {
+    $('btn-upload-script').addEventListener('click', function () {
       var input = $('cfg-source-file');
       if (!input) return;
       var file = input.files && input.files[0];
@@ -236,7 +311,7 @@
         showToast('请选择 .js 音源脚本文件', 'error');
         return;
       }
-      var btn = $('btn-upload-source');
+      var btn = $('btn-upload-script');
       btn.disabled = true;
       // 以原始字节发送（不包裹 JSON）
       fetch(API_BASE + '/upload-source?name=' + encodeURIComponent(file.name), {
@@ -248,14 +323,16 @@
           return JSON.parse(text);
         });
       }).then(function (res) {
-        if (res.success) {
-          fileSources.push({ id: res.id, name: res.name });
-          renderUploadedList();
-          input.value = '';
-          showToast('脚本已上传: ' + res.name);
-        } else {
-          showToast('上传失败: ' + (res.error || '未知错误'), 'error');
-        }
+        if (!res.success) throw new Error(res.error || '上传失败');
+        // 将上传的脚本加入配置
+        var cs = currentCustomSources();
+        cs.push({ kind: 'file', value: res.id, name: res.name });
+        return api('/config', 'POST', { customSources: cs });
+      }).then(function (res) {
+        if (!res.success) throw new Error(res.error || '保存失败');
+        input.value = '';
+        showToast('脚本已上传并添加');
+        loadSources();
       }).catch(function (e) { showToast('上传失败: ' + e, 'error'); })
         .finally(function () { btn.disabled = false; });
     });
@@ -264,17 +341,14 @@
   // ==================== 音源模式切换 ====================
   function toggleSourceFields() {
     var builtinRadio = $('cfg-mode-builtin');
-    var builtinFields = $('builtin-source-fields');
     var externalFields = $('external-source-fields');
     var hint = $('source-mode-hint');
-    if (!builtinRadio || !builtinFields || !externalFields) return;
+    if (!builtinRadio || !externalFields) return;
 
     if (builtinRadio.checked) {
-      show(builtinFields);
       hide(externalFields);
       if (hint) hint.textContent = '通过洛雪音源脚本解析音乐 URL，可添加多个脚本（推荐）';
     } else {
-      hide(builtinFields);
       show(externalFields);
       if (hint) hint.textContent = '使用自行部署的洛雪音源 API 服务器获取音乐链接';
     }
@@ -300,19 +374,11 @@
   if ($('btn-save-config')) {
     $('btn-save-config').addEventListener('click', function () {
       var useBuiltin = $('cfg-mode-builtin') ? $('cfg-mode-builtin').checked : true;
-      // 合并 URL 与上传文件为统一 customSources
-      var customSources = [];
-      for (var i = 0; i < sourceUrls.length; i++) {
-        customSources.push({ kind: 'url', value: sourceUrls[i], name: sourceUrls[i] });
-      }
-      for (var j = 0; j < fileSources.length; j++) {
-        customSources.push({ kind: 'file', value: fileSources[j].id, name: fileSources[j].name });
-      }
       var config = {
         useBuiltinSource: useBuiltin,
         luoxueApiUrl: useBuiltin ? '' : ($('cfg-url') ? $('cfg-url').value.trim() : ''),
         luoxueApiPass: useBuiltin ? '' : ($('cfg-pass') ? $('cfg-pass').value : ''),
-        customSources: customSources,
+        customSources: currentCustomSources(),
         defaultSearchSource: getCurrentSearchSource(),
         defaultQuality: $('cfg-quality') ? $('cfg-quality').value : '320k',
       };
@@ -354,18 +420,11 @@
       hide(resultEl);
 
       var useBuiltin = $('cfg-mode-builtin') ? $('cfg-mode-builtin').checked : true;
-      var customSources = [];
-      for (var ci = 0; ci < sourceUrls.length; ci++) {
-        customSources.push({ kind: 'url', value: sourceUrls[ci], name: sourceUrls[ci] });
-      }
-      for (var cj = 0; cj < fileSources.length; cj++) {
-        customSources.push({ kind: 'file', value: fileSources[cj].id, name: fileSources[cj].name });
-      }
       var config = {
         useBuiltinSource: useBuiltin,
         luoxueApiUrl: useBuiltin ? '' : ($('cfg-url') ? $('cfg-url').value.trim() : ''),
         luoxueApiPass: useBuiltin ? '' : ($('cfg-pass') ? $('cfg-pass').value : ''),
-        customSources: customSources,
+        customSources: currentCustomSources(),
         defaultSearchSource: getCurrentSearchSource(),
         defaultQuality: $('cfg-quality') ? $('cfg-quality').value : '320k',
       };
@@ -645,6 +704,7 @@
   // ==================== 初始化 ====================
   loadConfig();
   loadPlatforms();
+  loadSources();
 
   // 页面加载时检查是否有正在进行的导入任务
   api('/status', 'GET').then(function (res) {

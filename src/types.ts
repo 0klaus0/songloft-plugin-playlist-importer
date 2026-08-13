@@ -45,6 +45,16 @@ export interface CustomSource {
   kind: 'url' | 'file';
   value: string;
   name: string;
+  /** 是否启用（false 时跳过该源，默认 true） */
+  enabled?: boolean;
+  /** 脚本作者（从脚本头部注释解析） */
+  author?: string;
+  /** 脚本版本（从脚本头部注释解析） */
+  version?: string;
+  /** 脚本描述（从脚本头部注释解析） */
+  description?: string;
+  /** 脚本声明支持的来源（kw/kg/tx/wy/mg），由初始化时探测得到 */
+  platforms?: LXSource[];
 }
 
 /** 单个平台的检测结果（用于前端像洛雪一样按平台展示可用性） */

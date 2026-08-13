@@ -146,7 +146,7 @@ async function streamTrack(
   track: TrackInfo,
   progress: ImportProgress
 ): Promise<number | null> {
-  const hasCustomSource = (config.customSourceUrls || []).some(u => u.trim().length > 0);
+  const hasCustomSource = (config.customSources || []).some(s => s.value && s.value.length > 0 && s.enabled !== false) || (config.customSourceUrls || []).some(u => u.trim().length > 0);
   const hasExternalApi = config.luoxueApiUrl && !config.useBuiltinSource;
 
   // 尝试解析直接 URL（自定义音源脚本 → 外部 API）
@@ -200,7 +200,7 @@ async function downloadTrack(
   track: TrackInfo,
   progress: ImportProgress
 ): Promise<number | null> {
-  const hasCustomSource = (config.customSourceUrls || []).some(u => u.trim().length > 0);
+  const hasCustomSource = (config.customSources || []).some(s => s.value && s.value.length > 0 && s.enabled !== false) || (config.customSourceUrls || []).some(u => u.trim().length > 0);
   const hasExternalApi = config.luoxueApiUrl && !config.useBuiltinSource;
 
   let songId: number | null = null;
@@ -322,7 +322,7 @@ export async function importPlaylist(
   logInfo(`阶段 1/2: 预解析音源 URL (${playlist.tracks.length} 首)`);
   const resolvedTracks: ResolvedTrack[] = [];
 
-  const hasCustomSource = (config.customSourceUrls || []).some(u => u.trim().length > 0);
+  const hasCustomSource = (config.customSources || []).some(s => s.value && s.value.length > 0 && s.enabled !== false) || (config.customSourceUrls || []).some(u => u.trim().length > 0);
   const hasExternalApi = config.luoxueApiUrl && !config.useBuiltinSource;
   const hasAnySource = hasCustomSource || hasExternalApi;
 

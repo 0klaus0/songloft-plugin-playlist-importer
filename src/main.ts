@@ -17,7 +17,7 @@
  */
 /// <reference types="@songloft/plugin-sdk" />
 import { jsonResponse, createRouter } from '@songloft/plugin-sdk';
-import { PluginConfig, ImportProgress, PlaylistInfo, CustomSource } from './types';
+import { PluginConfig, ImportProgress, PlaylistInfo, CustomSource, LX_SOURCE_NAMES } from './types';
 import { errorResponse, parseBody, bodyToString } from './utils';
 import { loadConfig, saveConfig, validateConfig, saveUploadedSource, deleteUploadedSource, makeSourceFileId, SOURCE_FILE_KEY_PREFIX } from './config';
 import { parseShareLink, getSupportedPlatforms } from './parsers';
@@ -25,6 +25,7 @@ import { fetchPlaylist } from './fetchers';
 import { testLuoxueServer } from './luoxue';
 import { importPlaylist } from './songloft-api';
 import { getLogs, clearLogs, restoreLogs, logInfo, logWarn, logError } from './logger';
+import { loadSourceContent, extractSourceMetadata } from './lx-source';
 
 const router = createRouter();
 
@@ -165,6 +166,147 @@ router.post('/api/delete-source', async (req) => {
     configCache = currentConfig;
   }
   await deleteUploadedSource(body.id);
+  return jsonResponse({ success: true, message: '已删除' });
+});
+
+/**
+ * 构建带元数据的音源列表（供前端"自定义源管理"界面展示）
+ * 对每个源加载脚本内容并提取元数据（名称/作者/版本/描述/支持平台）。
+ */
+async function buildSourceList(config: PluginConfig): Promise<Array<Record<string, unknown>>> {
+  const list: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < (config.customSources || []).length; i++) {
+    const s = config.customSources[i];
+    const item: Record<string, unknown> = {
+      index: i,
+      kind: s.kind,
+      value: s.value,
+      name: s.name || (s.kind === 'url' ? s.value : '上传脚本'),
+      enabled: s.enabled !== false,
+      author: s.author || '',
+      version: s.version || '',
+      description: s.description || '',
+      platforms: s.platforms || [],
+    };
+    // 尝试加载脚本并补齐缺失的元数据
+    try {
+      const code = await loadSourceContent(s);
+      if (code) {
+        const meta = extractSourceMetadata(code);
+        if (!item.author && meta.author) item.author = meta.author;
+        if (!item.version && meta.version) item.version = meta.version;
+        if (!item.description && meta.description) item.description = meta.description;
+        if ((!item.platforms || item.platforms.length === 0) && meta.platforms) item.platforms = meta.platforms;
+        if (!item.name || item.name === s.value || item.name === '上传脚本') {
+          if (meta.name) item.name = meta.name;
+        }
+      }
+    } catch { /* 忽略元数据提取失败 */ }
+    list.push(item);
+  }
+  return list;
+}
+
+/** GET /api/sources — 获取音源列表（含元数据） */
+router.get('/api/sources', async () => {
+  const config = await getConfig();
+  const sources = await buildSourceList(config);
+  return jsonResponse({ success: true, sources });
+});
+
+/** POST /api/sources/add-url — 从 URL 添加音源（下载脚本并提取元数据） */
+router.post('/api/sources/add-url', async (req) => {
+  const body = parseBody<{ url?: string }>(req.body);
+  const url = (body.url || '').trim();
+  if (!url) return errorResponse('请输入音源 URL');
+  if (!/^https?:\/\//i.test(url)) return errorResponse('URL 必须以 http:// 或 https:// 开头');
+
+  const config = await getConfig();
+  const existing = (config.customSources || []).find((s) => s.kind === 'url' && s.value === url);
+  if (existing) return errorResponse('该音源已存在');
+
+  // 下载脚本并提取元数据
+  const code = await loadSourceContent({ kind: 'url', value: url, name: url });
+  if (!code) return errorResponse('无法下载该音源脚本，请检查 URL 是否可访问');
+
+  const meta = extractSourceMetadata(code);
+  const source: CustomSource = {
+    kind: 'url',
+    value: url,
+    name: meta.name || url,
+    enabled: true,
+    author: meta.author,
+    version: meta.version,
+    description: meta.description,
+    platforms: meta.platforms as CustomSource['platforms'],
+  };
+
+  config.customSources = config.customSources || [];
+  config.customSources.push(source);
+  await saveConfig(config);
+  configCache = config;
+
+  logInfo(`已从 URL 添加音源: ${source.name} (${url})`);
+  return jsonResponse({ success: true, source });
+});
+
+/** POST /api/sources/toggle — 启用/禁用音源 */
+router.post('/api/sources/toggle', async (req) => {
+  const body = parseBody<{ index?: number; enabled?: boolean }>(req.body);
+  const idx = body.index;
+  if (typeof idx !== 'number' || idx < 0) return errorResponse('缺少有效的音源索引');
+
+  const config = await getConfig();
+  const sources = config.customSources || [];
+  if (idx >= sources.length) return errorResponse('音源索引越界');
+  sources[idx].enabled = body.enabled !== false;
+  await saveConfig(config);
+  configCache = config;
+  return jsonResponse({ success: true, message: sources[idx].enabled ? '已启用' : '已禁用' });
+});
+
+/** POST /api/sources/reorder — 调整音源顺序（body: { order: number[] }，新的索引顺序） */
+router.post('/api/sources/reorder', async (req) => {
+  const body = parseBody<{ order?: number[] }>(req.body);
+  const order = body.order;
+  if (!Array.isArray(order) || order.length === 0) return errorResponse('缺少排序信息');
+
+  const config = await getConfig();
+  const sources = config.customSources || [];
+  if (order.length !== sources.length) return errorResponse('排序数据与音源数量不一致');
+
+  const reordered: CustomSource[] = [];
+  for (const idx of order) {
+    if (typeof idx !== 'number' || idx < 0 || idx >= sources.length) {
+      return errorResponse('排序数据包含无效索引');
+    }
+    reordered.push(sources[idx]);
+  }
+  config.customSources = reordered;
+  await saveConfig(config);
+  configCache = config;
+  return jsonResponse({ success: true, message: '排序已保存' });
+});
+
+/** POST /api/sources/delete — 删除音源（body: { index: number }） */
+router.post('/api/sources/delete', async (req) => {
+  const body = parseBody<{ index?: number }>(req.body);
+  const idx = body.index;
+  if (typeof idx !== 'number' || idx < 0) return errorResponse('缺少有效的音源索引');
+
+  const config = await getConfig();
+  const sources = config.customSources || [];
+  if (idx >= sources.length) return errorResponse('音源索引越界');
+
+  const removed = sources[idx];
+  // 若为上传文件，同时清理 storage 中的脚本文件
+  if (removed.kind === 'file' && removed.value) {
+    try { await deleteUploadedSource(removed.value); } catch { /* 忽略清理失败 */ }
+  }
+  sources.splice(idx, 1);
+  await saveConfig(config);
+  configCache = config;
+  logInfo(`已删除音源: ${removed.name || removed.value}`);
   return jsonResponse({ success: true, message: '已删除' });
 });
 

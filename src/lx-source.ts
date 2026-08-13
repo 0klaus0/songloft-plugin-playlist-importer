@@ -432,6 +432,64 @@ export async function loadSourceContent(source: CustomSource): Promise<string | 
   return downloadScript(source.value);
 }
 
+/**
+ * 从音源脚本源码中提取元数据（名称/作者/版本/描述/支持平台）
+ *
+ * 洛雪音源脚本通常在文件头部注释中声明：
+ *   // @name 源名称
+ *   // @version 1.0.0
+ *   // @author 作者
+ *   // @description 描述
+ * 支持平台则通过扫描脚本中出现的来源 key（kw/kg/tx/wy/mg）推断。
+ *
+ * @param scriptCode 脚本源码
+ * @returns 提取到的元数据（未找到的字段为 undefined）
+ */
+export function extractSourceMetadata(scriptCode: string): {
+  name?: string;
+  author?: string;
+  version?: string;
+  description?: string;
+  platforms?: string[];
+} {
+  const meta: { name?: string; author?: string; version?: string; description?: string; platforms?: string[] } = {};
+
+  if (!scriptCode) return meta;
+
+  // 解析头部注释中的 @name / @version / @author / @description
+  // 取脚本前 4000 字符（头部注释通常在此范围内）
+  const header = scriptCode.substring(0, 4000);
+  const tagRe = /@(name|version|author|description)\s+([^\r\n*]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = tagRe.exec(header)) !== null) {
+    const key = m[1].toLowerCase();
+    const val = (m[2] || '').trim().replace(/^\s*\*?\s*/, '').trim();
+    if (!val) continue;
+    if (key === 'name' && !meta.name) meta.name = val;
+    else if (key === 'version' && !meta.version) meta.version = val;
+    else if (key === 'author' && !meta.author) meta.author = val;
+    else if (key === 'description' && !meta.description) meta.description = val;
+  }
+
+  // 若头部没有 @name，尝试从脚本内常见声明提取（如 currentScriptInfo 或 title）
+  if (!meta.name) {
+    const nameMatch = scriptCode.match(/currentScriptInfo\s*=\s*\{[^}]*name\s*:\s*['"]([^'"]+)['"]/);
+    if (nameMatch) meta.name = nameMatch[1];
+  }
+
+  // 推断支持平台：扫描脚本中出现的来源 key
+  const sourceKeys = ['kw', 'kg', 'tx', 'wy', 'mg'];
+  const found: string[] = [];
+  for (const key of sourceKeys) {
+    // 匹配如 "kw" / 'kw' / :kw / kw: 等作为来源标识的出现
+    const re = new RegExp(`["'\\s:,(]${key}["'\\s:,){}]`, 'g');
+    if (re.test(scriptCode)) found.push(key);
+  }
+  if (found.length > 0) meta.platforms = found;
+
+  return meta;
+}
+
 /** 下载音源脚本内容（URL 方式） */
 async function downloadScript(url: string): Promise<string | null> {
   if (scriptCache.has(url)) return scriptCache.get(url)!;

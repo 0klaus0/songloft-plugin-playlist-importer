@@ -360,7 +360,7 @@ export async function resolveTrackUrl(
 ): Promise<LuoxueResult | null> {
   const customSources = (config.customSources || [])
     .map((s) => ({ kind: s.kind, value: s.value, name: s.name || s.value }))
-    .filter((s) => s.value && s.value.length > 0);
+    .filter((s) => s.value && s.value.length > 0 && s.enabled !== false);
   const hasExternalApi = !config.useBuiltinSource && !!config.luoxueApiUrl;
 
   // 既没有自定义音源，也没有外部 API，返回 null（使用 sourceData）
@@ -511,7 +511,7 @@ export async function testLuoxueServer(
 ): Promise<{ ok: boolean; message: string; platforms?: PlatformStatus[] }> {
   const customSources = (config.customSources || [])
     .map((s) => ({ kind: s.kind, value: s.value, name: s.name || s.value }))
-    .filter((s) => s.value && s.value.length > 0);
+    .filter((s) => s.value && s.value.length > 0 && s.enabled !== false);
 
   // 优先测试自定义音源脚本（按平台探测每个来源的可用性）
   if (customSources.length > 0) {
