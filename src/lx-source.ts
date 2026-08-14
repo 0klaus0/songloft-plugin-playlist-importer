@@ -51,154 +51,6 @@ let envReady = false;
 let lastInitError: string = '';
 
 /**
- * 纯 JS 同步 crypto 实现（md5 / sha1 / sha256）
- * 避免脚本依赖 Node.js 的 crypto.createHash（jsenv 中通常不存在）。
- */
-const SYNC_CRYPTO = (function () {
-  // ---------------- md5 ----------------
-  function md5(s: string): string {
-    function add32(a: number, b: number) { return (a + b) & 0xffffffff; }
-    function cmn(q: number, a: number, b: number, x: number, s: number, t: number) {
-      a = add32(add32(a, q), add32(x, t));
-      return add32((a << s) | (a >>> (32 - s)), b);
-    }
-    function ff(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn((b & c) | (~b & d), a, b, x, s, t); }
-    function gg(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn((b & d) | (c & ~d), a, b, x, s, t); }
-    function hh(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn(b ^ c ^ d, a, b, x, s, t); }
-    function ii(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn(c ^ (b | ~d), a, b, x, s, t); }
-    function md5cycle(x: number[], k: number[]) {
-      let [a, b, c, d] = [x[0], x[1], x[2], x[3]];
-      a = ff(a, b, c, d, k[0], 7, -680876936); a = ff(d, a, b, c, k[1], 12, -389564586); a = ff(c, d, a, b, k[2], 17, 606105819); a = ff(b, c, d, a, k[3], 22, -1044525330);
-      a = ff(a, b, c, d, k[4], 7, -176418897); a = ff(d, a, b, c, k[5], 12, 1200080426); a = ff(c, d, a, b, k[6], 17, -1473231341); a = ff(b, c, d, a, k[7], 22, -45705983);
-      a = ff(a, b, c, d, k[8], 7, 1770035416); a = ff(d, a, b, c, k[9], 12, -1958414417); a = ff(c, d, a, b, k[10], 17, -42063); a = ff(b, c, d, a, k[11], 22, -1990404162);
-      a = ff(a, b, c, d, k[12], 7, 1804603682); a = ff(d, a, b, c, k[13], 12, -40341101); a = ff(c, d, a, b, k[14], 17, -1502002290); a = ff(b, c, d, a, k[15], 22, 1236535329);
-      a = gg(a, b, c, d, k[1], 5, -165796510); a = gg(d, a, b, c, k[6], 9, -1069501632); a = gg(c, d, a, b, k[11], 14, 643717713); a = gg(b, c, d, a, k[0], 20, -373897302);
-      a = gg(a, b, c, d, k[5], 5, -701558691); a = gg(d, a, b, c, k[10], 9, 38016083); a = gg(c, d, a, b, k[15], 14, -660478335); a = gg(b, c, d, a, k[4], 20, -405537848);
-      a = gg(a, b, c, d, k[9], 5, 568446438); a = gg(d, a, b, c, k[14], 9, -1019803690); a = gg(c, d, a, b, k[3], 14, -187363961); a = gg(b, c, d, a, k[8], 20, 1163531501);
-      a = gg(a, b, c, d, k[13], 5, -1444681467); a = gg(d, a, b, c, k[2], 9, -51403784); a = gg(c, d, a, b, k[7], 14, 1735328473); a = gg(b, c, d, a, k[12], 20, -1926607734);
-      a = hh(a, b, c, d, k[5], 4, -378558); a = hh(d, a, b, c, k[8], 11, -2022574463); a = hh(c, d, a, b, k[11], 16, 1839030562); a = hh(b, c, d, a, k[14], 23, -35309556);
-      a = hh(a, b, c, d, k[1], 4, -1530992060); a = hh(d, a, b, c, k[4], 11, 1272893353); a = hh(c, d, a, b, k[7], 16, -155497632); a = hh(b, c, d, a, k[10], 23, -1094730640);
-      a = hh(a, b, c, d, k[13], 4, 681279174); a = hh(d, a, b, c, k[0], 11, -358537222); a = hh(c, d, a, b, k[3], 16, -722521979); a = hh(b, c, d, a, k[6], 23, 76029189);
-      a = hh(a, b, c, d, k[9], 4, -640364487); a = hh(d, a, b, c, k[12], 11, -421815835); a = hh(c, d, a, b, k[15], 16, 530742520); a = hh(b, c, d, a, k[2], 23, -995338651);
-      a = ii(a, b, c, d, k[0], 6, -198630844); a = ii(d, a, b, c, k[7], 10, 1126891415); a = ii(c, d, a, b, k[14], 15, -1416354905); a = ii(b, c, d, a, k[5], 21, -57434055);
-      a = ii(a, b, c, d, k[12], 6, 1700485571); a = ii(d, a, b, c, k[3], 10, -1894986606); a = ii(c, d, a, b, k[10], 15, -1051523); a = ii(b, c, d, a, k[1], 21, -2054922799);
-      a = ii(a, b, c, d, k[8], 6, 1873313359); a = ii(d, a, b, c, k[15], 10, -30611744); a = ii(c, d, a, b, k[6], 15, -1560198380); a = ii(b, c, d, a, k[13], 21, 1309151649);
-      a = ii(a, b, c, d, k[4], 6, -145523070); a = ii(d, a, b, c, k[11], 10, -1120210379); a = ii(c, d, a, b, k[2], 15, 718787259); a = ii(b, c, d, a, k[9], 21, -343485551);
-      x[0] = add32(a, x[0]); x[1] = add32(b, x[1]); x[2] = add32(c, x[2]); x[3] = add32(d, x[3]);
-    }
-    function md5blk(s: string): number[] {
-      const md5blks: number[] = [];
-      for (let i = 0; i < 64; i += 4) {
-        md5blks[i >> 2] = s.charCodeAt(i) + (s.charCodeAt(i + 1) << 8) + (s.charCodeAt(i + 2) << 16) + (s.charCodeAt(i + 3) << 24);
-      }
-      return md5blks;
-    }
-    function md51(s: string): number[] {
-      const n = s.length;
-      const state = [1732584193, -271733879, -1732584194, 271733878];
-      let i: number;
-      for (i = 64; i <= s.length; i += 64) md5cycle(state, md5blk(s.substring(i - 64, i)));
-      s = s.substring(i - 64);
-      const tail = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-      for (i = 0; i < s.length; i += 1) tail[i >> 2] |= s.charCodeAt(i) << ((i % 4) << 3);
-      tail[i >> 2] |= 0x80 << ((i % 4) << 3);
-      if (i > 55) { md5cycle(state, tail); for (i = 0; i < 16; i++) tail[i] = 0; }
-      tail[14] = n * 8;
-      md5cycle(state, tail);
-      return state;
-    }
-    function rhex(n: number): string {
-      let s = '', hex = '0123456789abcdef';
-      for (let j = 0; j < 4; j++) s += hex[(n >> (j * 8 + 4)) & 0x0f] + hex[(n >> (j * 8)) & 0x0f];
-      return s;
-    }
-    function hex(x: number[]): string { let s = ''; for (let i = 0; i < x.length; i++) s += rhex(x[i]); return s; }
-    return hex(md51(s));
-  }
-
-  // ---------------- sha1 ----------------
-  function sha1(s: string): string {
-    function rotl(n: number, s: number) { return (n << s) | (n >>> (32 - s)); }
-    function toUTF8(str: string): number[] {
-      const out: number[] = [];
-      for (let i = 0; i < str.length; i++) {
-        let c = str.charCodeAt(i);
-        if (c < 0x80) out.push(c);
-        else if (c < 0x800) { out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f)); }
-        else if (c < 0xd800 || c >= 0xe000) { out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)); }
-        else { i++; c = 0x10000 + (((c & 0x3ff) << 10) | (str.charCodeAt(i) & 0x3ff)); out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)); }
-      }
-      return out;
-    }
-    const msg = toUTF8(s);
-    const H = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
-    msg.push(0x80);
-    while (msg.length % 64 !== 56) msg.push(0);
-    const lenBits = s.length * 8;
-    msg.push((lenBits >>> 24) & 0xff, (lenBits >>> 16) & 0xff, (lenBits >>> 8) & 0xff, lenBits & 0xff, 0, 0, 0, 0);
-    const w = new Array(80);
-    for (let i = 0; i < msg.length; i += 64) {
-      for (let j = 0; j < 16; j++) w[j] = (msg[i + j * 4] << 24) | (msg[i + j * 4 + 1] << 16) | (msg[i + j * 4 + 2] << 8) | msg[i + j * 4 + 3];
-      for (let j = 16; j < 80; j++) w[j] = rotl(w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16], 1);
-      let [a, b, c, d, e] = H;
-      for (let j = 0; j < 80; j++) {
-        let f, k;
-        if (j < 20) { f = (b & c) | (~b & d); k = 0x5a827999; }
-        else if (j < 40) { f = b ^ c ^ d; k = 0x6ed9eba1; }
-        else if (j < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8f1bbcdc; }
-        else { f = b ^ c ^ d; k = 0xca62c1d6; }
-        const tmp = (rotl(a, 5) + f + e + k + (w[j] | 0)) | 0;
-        e = d; d = c; c = rotl(b, 30); b = a; a = tmp;
-      }
-      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0; H[4] = (H[4] + e) | 0;
-    }
-    return H.map((h) => ('00000000' + (h >>> 0).toString(16)).slice(-8)).join('');
-  }
-
-  // ---------------- sha256 ----------------
-  function sha256(s: string): string {
-    const K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
-    function rotr(n: number, s: number) { return (n >>> s) | (n << (32 - s)); }
-    function toBytes(str: string): number[] {
-      const out: number[] = [];
-      for (let i = 0; i < str.length; i++) {
-        let c = str.charCodeAt(i);
-        if (c < 0x80) out.push(c);
-        else if (c < 0x800) { out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f)); }
-        else if (c < 0xd800 || c >= 0xe000) { out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)); }
-        else { i++; c = 0x10000 + (((c & 0x3ff) << 10) | (str.charCodeAt(i) & 0x3ff)); out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)); }
-      }
-      return out;
-    }
-    const msg = toBytes(s);
-    const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
-    msg.push(0x80);
-    while (msg.length % 64 !== 56) msg.push(0);
-    const lenBits = s.length * 8;
-    msg.push((lenBits >>> 24) & 0xff, (lenBits >>> 16) & 0xff, (lenBits >>> 8) & 0xff, lenBits & 0xff, 0, 0, 0, 0);
-    const w = new Array(64);
-    for (let i = 0; i < msg.length; i += 64) {
-      for (let j = 0; j < 16; j++) w[j] = (msg[i + j * 4] << 24) | (msg[i + j * 4 + 1] << 16) | (msg[i + j * 4 + 2] << 8) | msg[i + j * 4 + 3];
-      for (let j = 16; j < 64; j++) { const s0 = rotr(w[j - 15], 7) ^ rotr(w[j - 15], 18) ^ (w[j - 15] >>> 3); const s1 = rotr(w[j - 2], 17) ^ rotr(w[j - 2], 19) ^ (w[j - 2] >>> 10); w[j] = (w[j - 16] + s0 + w[j - 7] + s1) | 0; }
-      let [a, b, c, d, e, f, g, h] = H;
-      for (let j = 0; j < 64; j++) {
-        const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-        const ch = (e & f) ^ (~e & g);
-        const t1 = (h + S1 + ch + K[j] + w[j]) | 0;
-        const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
-        const maj = (a & b) ^ (a & c) ^ (b & c);
-        const t2 = (S0 + maj) | 0;
-        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
-      }
-      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0; H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
-    }
-    return H.map((x) => ('00000000' + (x >>> 0).toString(16)).slice(-8)).join('');
-  }
-
-  return { md5, sha1, sha256 };
-})();
-
-/**
  * lx 全局对象的初始化代码（注入到 jsenv 子环境中）
  *
  * ★ 修复：同时创建 lx 与 musicApi 两个全局（共享同一套实现），
@@ -253,8 +105,9 @@ if (typeof atob === 'undefined') {
     for (var i = 0; i < str2.length; i += 4) {
       var n1 = chars.indexOf(str2.charAt(i)), n2 = chars.indexOf(str2.charAt(i + 1)), n3 = chars.indexOf(str2.charAt(i + 2)), n4 = chars.indexOf(str2.charAt(i + 3));
       output += String.fromCharCode((n1 << 2) | (n2 >> 4));
-      if (n3 !== -1) output += String.fromCharCode(((n2 & 15) << 4) | (n3 >> 2));
-      if (n4 !== -1) output += String.fromCharCode(((n3 & 3) << 6) | n4);
+      // ★ 修复：用索引边界判断代替 n3/n4 !== -1（indexOf('') 返回 0，会多输出一个 0 字节）
+      if (i + 2 < str2.length) output += String.fromCharCode(((n2 & 15) << 4) | (n3 >> 2));
+      if (i + 3 < str2.length) output += String.fromCharCode(((n3 & 3) << 6) | n4);
     }
     return output;
   };
@@ -279,6 +132,425 @@ if (typeof TextDecoder === 'undefined') {
     this.decode = function(bytes) { var str = ''; for (var i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]); return str; };
   };
 }
+
+// ===== Buffer polyfill（仅在宿主 Buffer 不完整时启用）=====
+(function() {
+  if (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function' && typeof Buffer.alloc === 'function' && typeof Buffer.concat === 'function') return;
+  var HEX = '0123456789abcdef';
+  var B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  function utf8Bytes(str) {
+    var out = [];
+    for (var i = 0; i < str.length; i++) {
+      var c = str.charCodeAt(i);
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) { out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f)); }
+      else if (c < 0xd800 || c >= 0xe000) { out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)); }
+      else { i++; c = 0x10000 + (((c & 0x3ff) << 10) | (str.charCodeAt(i) & 0x3ff)); out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)); }
+    }
+    return out;
+  }
+  function utf8String(u8) {
+    var out = '';
+    for (var i = 0; i < u8.length; ) {
+      var b = u8[i];
+      if (b < 0x80) { out += String.fromCharCode(b); i++; }
+      else if (b < 0xe0) { out += String.fromCharCode(((b & 0x1f) << 6) | (u8[i + 1] & 0x3f)); i += 2; }
+      else if (b < 0xf0) { out += String.fromCharCode(((b & 0x0f) << 12) | ((u8[i + 1] & 0x3f) << 6) | (u8[i + 2] & 0x3f)); i += 3; }
+      else { var cp = ((b & 0x07) << 18) | ((u8[i + 1] & 0x3f) << 12) | ((u8[i + 2] & 0x3f) << 6) | (u8[i + 3] & 0x3f); cp -= 0x10000; out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff)); i += 4; }
+    }
+    return out;
+  }
+  function hexString(u8) { var out = ''; for (var i = 0; i < u8.length; i++) out += HEX.charAt(u8[i] >> 4) + HEX.charAt(u8[i] & 15); return out; }
+  function b64String(u8) {
+    var out = '';
+    for (var i = 0; i < u8.length; i += 3) {
+      var b1 = u8[i], b2 = i + 1 < u8.length ? u8[i + 1] : 0, b3 = i + 2 < u8.length ? u8[i + 2] : 0;
+      out += B64[b1 >> 2] + B64[((b1 & 3) << 4) | (b2 >> 4)];
+      out += i + 1 < u8.length ? B64[((b2 & 15) << 2) | (b3 >> 6)] : '=';
+      out += i + 2 < u8.length ? B64[b3 & 63] : '=';
+    }
+    return out;
+  }
+  function fromHex(str) { var out = new Uint8Array(Math.floor(str.length / 2)); for (var i = 0; i < out.length; i++) out[i] = parseInt(str.substr(i * 2, 2), 16); return out; }
+  function fromB64(str) {
+    var s = str.replace(/=+$/, '');
+    var out = [];
+    for (var i = 0; i < s.length; i += 4) {
+      var n1 = B64.indexOf(s.charAt(i)), n2 = B64.indexOf(s.charAt(i + 1)), n3 = B64.indexOf(s.charAt(i + 2)), n4 = B64.indexOf(s.charAt(i + 3));
+      out.push((n1 << 2) | (n2 >> 4));
+      // ★ 修复：用索引边界判断代替 n3/n4 !== -1（indexOf('') 返回 0，会多输出一个 0 字节）
+      if (i + 2 < s.length) out.push(((n2 & 15) << 4) | (n3 >> 2));
+      if (i + 3 < s.length) out.push(((n3 & 3) << 6) | n4);
+    }
+    return new Uint8Array(out);
+  }
+  function wrap(u8) {
+    u8.toString = function(enc) {
+      enc = enc || 'utf8';
+      if (enc === 'hex') return hexString(u8);
+      if (enc === 'base64') return b64String(u8);
+      if (enc === 'binary' || enc === 'latin1') { var s = ''; for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return s; }
+      return utf8String(u8);
+    };
+    u8.toJSON = function() { return { type: 'Buffer', data: Array.prototype.slice.call(u8) }; };
+    u8.slice = function(start, end) {
+      start = start || 0; if (start < 0) start = u8.length + start;
+      end = end === undefined ? u8.length : end; if (end < 0) end = u8.length + end;
+      return wrap(new Uint8Array(u8.subarray(start, end)));
+    };
+    u8.equals = function(other) {
+      if (!other || other.length !== u8.length) return false;
+      for (var i = 0; i < u8.length; i++) if (u8[i] !== other[i]) return false;
+      return true;
+    };
+    u8.write = function(str, offset, length) {
+      offset = offset || 0;
+      var bytes = utf8Bytes(String(str));
+      if (length === undefined) length = bytes.length;
+      for (var i = 0; i < length && offset + i < u8.length; i++) u8[offset + i] = bytes[i];
+      return i;
+    };
+    u8.copy = function(target, tStart, sStart, sEnd) {
+      tStart = tStart || 0; sStart = sStart || 0; sEnd = sEnd === undefined ? u8.length : sEnd;
+      for (var i = sStart; i < sEnd && tStart + (i - sStart) < target.length; i++) target[tStart + (i - sStart)] = u8[i];
+      return i - sStart;
+    };
+    u8.indexOf = function(value, start) {
+      start = start || 0;
+      if (typeof value === 'number') { for (var i = start; i < u8.length; i++) if (u8[i] === value) return i; return -1; }
+      if (value && typeof value.length === 'number') {
+        outer: for (var j = start; j <= u8.length - value.length; j++) { for (var k = 0; k < value.length; k++) if (u8[j + k] !== value[k]) continue outer; return j; }
+        return -1;
+      }
+      return -1;
+    };
+    return u8;
+  }
+  function Buf(arg, enc) {
+    var u8;
+    if (typeof arg === 'number') u8 = new Uint8Array(arg);
+    else if (typeof arg === 'string') {
+      if (enc === 'hex') u8 = fromHex(arg);
+      else if (enc === 'base64') u8 = fromB64(arg);
+      else u8 = new Uint8Array(utf8Bytes(arg));
+    } else if (arg instanceof Uint8Array) u8 = new Uint8Array(arg);
+    else if (arg && typeof arg.length === 'number') u8 = new Uint8Array(arg);
+    else u8 = new Uint8Array(0);
+    return wrap(u8);
+  }
+  Buf.from = function(arg, enc) { return Buf(arg, enc); };
+  Buf.alloc = function(size, fill) { var u8 = new Uint8Array(size); if (fill !== undefined) { if (typeof fill === 'number') { for (var i = 0; i < size; i++) u8[i] = fill; } else { var f = utf8Bytes(String(fill)); for (var j = 0; j < size; j++) u8[j] = f[j % f.length]; } } return wrap(u8); };
+  Buf.allocUnsafe = function(size) { return wrap(new Uint8Array(size)); };
+  Buf.concat = function(list, totalLength) {
+    if (!list || list.length === 0) return Buf(0);
+    var total = totalLength !== undefined ? totalLength : 0;
+    if (totalLength === undefined) for (var i = 0; i < list.length; i++) total += list[i].length;
+    var out = new Uint8Array(total);
+    var off = 0;
+    for (var j = 0; j < list.length; j++) { var b = list[j]; for (var k = 0; k < b.length && off < total; k++) out[off++] = b[k]; }
+    return wrap(out);
+  };
+  Buf.isBuffer = function(b) { return b instanceof Uint8Array && typeof b.toString === 'function'; };
+  Buf.byteLength = function(str, enc) {
+    if (typeof str !== 'string') return str.length;
+    if (enc === 'hex') return Math.floor(str.length / 2);
+    if (enc === 'base64') return Math.floor(str.replace(/=+$/, '').length * 3 / 4);
+    return utf8Bytes(str).length;
+  };
+  globalThis.Buffer = Buf;
+})();
+
+// ===== crypto polyfill：纯 JS 实现 md5/sha1/sha256 + createHash/createHmac =====
+(function() {
+  function utf8Encode(s) {
+    var out = [];
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) { out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f)); }
+      else if (c < 0xd800 || c >= 0xe000) { out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)); }
+      else { i++; c = 0x10000 + (((c & 0x3ff) << 10) | (s.charCodeAt(i) & 0x3ff)); out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)); }
+    }
+    var str = '';
+    for (var j = 0; j < out.length; j++) str += String.fromCharCode(out[j]);
+    return str;
+  }
+  function toBinary(data) {
+    if (typeof data === 'string') return utf8Encode(data);
+    if (data && typeof data.length === 'number') {
+      var s = '';
+      for (var i = 0; i < data.length; i++) s += String.fromCharCode(data[i] & 0xff);
+      return s;
+    }
+    return utf8Encode(String(data));
+  }
+  function rstr2hex(input) {
+    var hexTab = '0123456789abcdef';
+    var output = '';
+    for (var i = 0; i < input.length; i++) output += hexTab.charAt((input.charCodeAt(i) >>> 4) & 0x0f) + hexTab.charAt(input.charCodeAt(i) & 0x0f);
+    return output;
+  }
+  function rstr2b64(input) {
+    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var output = '';
+    for (var i = 0; i < input.length; i += 3) {
+      var b1 = input.charCodeAt(i) & 0xff;
+      var b2 = i + 1 < input.length ? input.charCodeAt(i + 1) & 0xff : 0;
+      var b3 = i + 2 < input.length ? input.charCodeAt(i + 2) & 0xff : 0;
+      output += chars[b1 >> 2];
+      output += chars[((b1 & 3) << 4) | (b2 >> 4)];
+      output += i + 1 < input.length ? chars[((b2 & 15) << 2) | (b3 >> 6)] : '=';
+      output += i + 2 < input.length ? chars[b3 & 63] : '=';
+    }
+    return output;
+  }
+  function rstr2buf(input) {
+    var arr = new Uint8Array(input.length);
+    for (var i = 0; i < input.length; i++) arr[i] = input.charCodeAt(i) & 0xff;
+    if (typeof Buffer !== 'undefined' && Buffer.from) return Buffer.from(arr);
+    return arr;
+  }
+  // ---- MD5 ----
+  function md5SafeAdd(x, y) {
+    var lsw = (x & 0xffff) + (y & 0xffff);
+    var msw = (x >> 16) + (y >> 16) + (lsw >> 16);
+    return (msw << 16) | (lsw & 0xffff);
+  }
+  function md5cmn(q, a, b, x, s, t) {
+    var sum = md5SafeAdd(md5SafeAdd(a, q), md5SafeAdd(x, t));
+    return md5SafeAdd(((sum << s) | (sum >>> (32 - s))), b);
+  }
+  function md5ff(a, b, c, d, x, s, t) { return md5cmn((b & c) | (~b & d), a, b, x, s, t); }
+  function md5gg(a, b, c, d, x, s, t) { return md5cmn((b & d) | (c & ~d), a, b, x, s, t); }
+  function md5hh(a, b, c, d, x, s, t) { return md5cmn(b ^ c ^ d, a, b, x, s, t); }
+  function md5ii(a, b, c, d, x, s, t) { return md5cmn(c ^ (b | ~d), a, b, x, s, t); }
+  function md5cycle(x, k) {
+    var a = x[0], b = x[1], c = x[2], d = x[3];
+    a = md5ff(a, b, c, d, k[0], 7, -680876936); d = md5ff(d, a, b, c, k[1], 12, -389564586); c = md5ff(c, d, a, b, k[2], 17, 606105819); b = md5ff(b, c, d, a, k[3], 22, -1044525330);
+    a = md5ff(a, b, c, d, k[4], 7, -176418897); d = md5ff(d, a, b, c, k[5], 12, 1200080426); c = md5ff(c, d, a, b, k[6], 17, -1473231341); b = md5ff(b, c, d, a, k[7], 22, -45705983);
+    a = md5ff(a, b, c, d, k[8], 7, 1770035416); d = md5ff(d, a, b, c, k[9], 12, -1958414417); c = md5ff(c, d, a, b, k[10], 17, -42063); b = md5ff(b, c, d, a, k[11], 22, -1990404162);
+    a = md5ff(a, b, c, d, k[12], 7, 1804603682); d = md5ff(d, a, b, c, k[13], 12, -40341101); c = md5ff(c, d, a, b, k[14], 17, -1502002290); b = md5ff(b, c, d, a, k[15], 22, 1236535329);
+    a = md5gg(a, b, c, d, k[1], 5, -165796510); d = md5gg(d, a, b, c, k[6], 9, -1069501632); c = md5gg(c, d, a, b, k[11], 14, 643717713); b = md5gg(b, c, d, a, k[0], 20, -373897302);
+    a = md5gg(a, b, c, d, k[5], 5, -701558691); d = md5gg(d, a, b, c, k[10], 9, 38016083); c = md5gg(c, d, a, b, k[15], 14, -660478335); b = md5gg(b, c, d, a, k[4], 20, -405537848);
+    a = md5gg(a, b, c, d, k[9], 5, 568446438); d = md5gg(d, a, b, c, k[14], 9, -1019803690); c = md5gg(c, d, a, b, k[3], 14, -187363961); b = md5gg(b, c, d, a, k[8], 20, 1163531501);
+    a = md5gg(a, b, c, d, k[13], 5, -1444681467); d = md5gg(d, a, b, c, k[2], 9, -51403784); c = md5gg(c, d, a, b, k[7], 14, 1735328473); b = md5gg(b, c, d, a, k[12], 20, -1926607734);
+    a = md5hh(a, b, c, d, k[5], 4, -378558); d = md5hh(d, a, b, c, k[8], 11, -2022574463); c = md5hh(c, d, a, b, k[11], 16, 1839030562); b = md5hh(b, c, d, a, k[14], 23, -35309556);
+    a = md5hh(a, b, c, d, k[1], 4, -1530992060); d = md5hh(d, a, b, c, k[4], 11, 1272893353); c = md5hh(c, d, a, b, k[7], 16, -155497632); b = md5hh(b, c, d, a, k[10], 23, -1094730640);
+    a = md5hh(a, b, c, d, k[13], 4, 681279174); d = md5hh(d, a, b, c, k[0], 11, -358537222); c = md5hh(c, d, a, b, k[3], 16, -722521979); b = md5hh(b, c, d, a, k[6], 23, 76029189);
+    a = md5hh(a, b, c, d, k[9], 4, -640364487); d = md5hh(d, a, b, c, k[12], 11, -421815835); c = md5hh(c, d, a, b, k[15], 16, 530742520); b = md5hh(b, c, d, a, k[2], 23, -995338651);
+    a = md5ii(a, b, c, d, k[0], 6, -198630844); d = md5ii(d, a, b, c, k[7], 10, 1126891415); c = md5ii(c, d, a, b, k[14], 15, -1416354905); b = md5ii(b, c, d, a, k[5], 21, -57434055);
+    a = md5ii(a, b, c, d, k[12], 6, 1700485571); d = md5ii(d, a, b, c, k[3], 10, -1894986606); c = md5ii(c, d, a, b, k[10], 15, -1051523); b = md5ii(b, c, d, a, k[1], 21, -2054922799);
+    a = md5ii(a, b, c, d, k[8], 6, 1873313359); d = md5ii(d, a, b, c, k[15], 10, -30611744); c = md5ii(c, d, a, b, k[6], 15, -1560198380); b = md5ii(b, c, d, a, k[13], 21, 1309151649);
+    a = md5ii(a, b, c, d, k[4], 6, -145523070); d = md5ii(d, a, b, c, k[11], 10, -1120210379); c = md5ii(c, d, a, b, k[2], 15, 718787259); b = md5ii(b, c, d, a, k[9], 21, -343485551);
+    return [a, b, c, d];
+  }
+  function str2binl(s) {
+    var bin = [];
+    for (var i = 0; i < s.length * 8; i += 8) bin[i >> 5] |= (s.charCodeAt(i / 8) & 0xff) << (i % 32);
+    return bin;
+  }
+  function binl2str(bin) {
+    var s = '';
+    for (var i = 0; i < bin.length * 32; i += 8) s += String.fromCharCode((bin[i >> 5] >>> (i % 32)) & 0xff);
+    return s;
+  }
+  function binlMD5(x, len) {
+    x[len >> 5] |= 0x80 << (len % 32);
+    x[(((len + 64) >>> 9) << 4) + 14] = len;
+    var a = 1732584193, b = -271733879, c = -1732584194, d = 271733878;
+    for (var i = 0; i < x.length; i += 16) {
+      var st = md5cycle([a, b, c, d], x.slice(i, i + 16));
+      a = md5SafeAdd(a, st[0]); b = md5SafeAdd(b, st[1]); c = md5SafeAdd(c, st[2]); d = md5SafeAdd(d, st[3]);
+    }
+    return [a, b, c, d];
+  }
+  function rstrMD5(s) { return binl2str(binlMD5(str2binl(s), s.length * 8)); }
+  // ---- SHA1 ----
+  function rstrSHA1(s) {
+    var bytes = [];
+    for (var i = 0; i < s.length; i++) bytes.push(s.charCodeAt(i) & 0xff);
+    var n = bytes.length;
+    var msg = bytes.slice();
+    msg.push(0x80);
+    while (msg.length % 64 !== 56) msg.push(0);
+    var lenBits = n * 8;
+    msg.push(0, 0, 0, 0, (lenBits >>> 24) & 0xff, (lenBits >>> 16) & 0xff, (lenBits >>> 8) & 0xff, lenBits & 0xff);
+    var H = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
+    var w = new Array(80);
+    for (var i2 = 0; i2 < msg.length; i2 += 64) {
+      for (var j = 0; j < 16; j++) w[j] = (msg[i2 + j * 4] << 24) | (msg[i2 + j * 4 + 1] << 16) | (msg[i2 + j * 4 + 2] << 8) | msg[i2 + j * 4 + 3];
+      for (var j2 = 16; j2 < 80; j2++) w[j2] = ((w[j2 - 3] ^ w[j2 - 8] ^ w[j2 - 14] ^ w[j2 - 16]) << 1) | ((w[j2 - 3] ^ w[j2 - 8] ^ w[j2 - 14] ^ w[j2 - 16]) >>> 31);
+      var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4];
+      for (var j3 = 0; j3 < 80; j3++) {
+        var f, k;
+        if (j3 < 20) { f = (b & c) | (~b & d); k = 0x5a827999; }
+        else if (j3 < 40) { f = b ^ c ^ d; k = 0x6ed9eba1; }
+        else if (j3 < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8f1bbcdc; }
+        else { f = b ^ c ^ d; k = 0xca62c1d6; }
+        var tmp = ((a << 5) | (a >>> 27)) + f + e + k + (w[j3] | 0);
+        e = d; d = c; c = ((b << 30) | (b >>> 2)); b = a; a = tmp;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0; H[4] = (H[4] + e) | 0;
+    }
+    var out = '';
+    for (var q = 0; q < 5; q++) { var v = H[q]; out += String.fromCharCode((v >>> 24) & 0xff, (v >>> 16) & 0xff, (v >>> 8) & 0xff, v & 0xff); }
+    return out;
+  }
+  // ---- SHA256 ----
+  function rstrSHA256(s) {
+    var K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
+    function rotr(n, s) { return (n >>> s) | (n << (32 - s)); }
+    function ch(x, y, z) { return (x & y) ^ (~x & z); }
+    function maj(x, y, z) { return (x & y) ^ (x & z) ^ (y & z); }
+    function sigma0(x) { return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22); }
+    function sigma1(x) { return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25); }
+    function gamma0(x) { return rotr(x, 7) ^ rotr(x, 18) ^ (x >>> 3); }
+    function gamma1(x) { return rotr(x, 17) ^ rotr(x, 19) ^ (x >>> 10); }
+    var bytes = [];
+    for (var i = 0; i < s.length; i++) bytes.push(s.charCodeAt(i) & 0xff);
+    var n = bytes.length;
+    var msg = bytes.slice();
+    msg.push(0x80);
+    while (msg.length % 64 !== 56) msg.push(0);
+    var lenBits = n * 8;
+    msg.push(0, 0, 0, 0, (lenBits >>> 24) & 0xff, (lenBits >>> 16) & 0xff, (lenBits >>> 8) & 0xff, lenBits & 0xff);
+    var H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    var W = new Array(64);
+    for (var i2 = 0; i2 < msg.length; i2 += 64) {
+      for (var j = 0; j < 16; j++) W[j] = (msg[i2 + j * 4] << 24) | (msg[i2 + j * 4 + 1] << 16) | (msg[i2 + j * 4 + 2] << 8) | msg[i2 + j * 4 + 3];
+      for (var j2 = 16; j2 < 64; j2++) W[j2] = (gamma1(W[j2 - 2]) + W[j2 - 7] + gamma0(W[j2 - 15]) + W[j2 - 16]) | 0;
+      var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (var j3 = 0; j3 < 64; j3++) {
+        var T1 = (h + sigma1(e) + ch(e, f, g) + K[j3] + W[j3]) | 0;
+        var T2 = (sigma0(a) + maj(a, b, c)) | 0;
+        h = g; g = f; f = e; e = (d + T1) | 0; d = c; c = b; b = a; a = (T1 + T2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    var out = '';
+    for (var q = 0; q < 8; q++) { var v = H[q]; out += String.fromCharCode((v >>> 24) & 0xff, (v >>> 16) & 0xff, (v >>> 8) & 0xff, v & 0xff); }
+    return out;
+  }
+  // ---- HMAC ----
+  function rstrHMAC(hashFn, key, data) {
+    var bkey = key;
+    if (bkey.length > 64) bkey = hashFn(bkey);
+    var ipad = '', opad = '';
+    for (var i = 0; i < 64; i++) {
+      var kb = i < bkey.length ? bkey.charCodeAt(i) : 0;
+      ipad += String.fromCharCode(kb ^ 0x36);
+      opad += String.fromCharCode(kb ^ 0x5c);
+    }
+    return hashFn(opad + hashFn(ipad + data));
+  }
+  function getHashFn(alg) {
+    alg = String(alg).toLowerCase();
+    if (alg === 'md5') return rstrMD5;
+    if (alg === 'sha1' || alg === 'sha-1') return rstrSHA1;
+    if (alg === 'sha256' || alg === 'sha-256') return rstrSHA256;
+    return null;
+  }
+  function createHash(alg) {
+    var fn = getHashFn(alg);
+    if (!fn) throw new Error('Unsupported hash algorithm: ' + alg);
+    var chunks = [];
+    return {
+      update: function(data) { chunks.push(toBinary(data)); return this; },
+      digest: function(enc) {
+        var raw = fn(chunks.join(''));
+        if (enc === 'hex') return rstr2hex(raw);
+        if (enc === 'base64') return rstr2b64(raw);
+        return rstr2buf(raw);
+      },
+      copy: function() { return this; }
+    };
+  }
+  function createHmac(alg, key) {
+    var fn = getHashFn(alg);
+    if (!fn) throw new Error('Unsupported hmac algorithm: ' + alg);
+    var keyStr = toBinary(key);
+    var chunks = [];
+    return {
+      update: function(data) { chunks.push(toBinary(data)); return this; },
+      digest: function(enc) {
+        var raw = rstrHMAC(fn, keyStr, chunks.join(''));
+        if (enc === 'hex') return rstr2hex(raw);
+        if (enc === 'base64') return rstr2b64(raw);
+        return rstr2buf(raw);
+      }
+    };
+  }
+  var __crypto = {
+    createHash: createHash,
+    createHmac: createHmac,
+    randomBytes: function(n) { var a = new Uint8Array(n); for (var i = 0; i < n; i++) a[i] = Math.floor(Math.random() * 256); return a; },
+    md5: function(s) { return rstr2hex(rstrMD5(utf8Encode(String(s)))); },
+    sha1: function(s) { return rstr2hex(rstrSHA1(utf8Encode(String(s)))); },
+    sha256: function(s) { return rstr2hex(rstrSHA256(utf8Encode(String(s)))); }
+  };
+  // ★ 修复：Node/部分环境 globalThis.crypto 是 WebCrypto（只读 getter，无 createHash）。
+  //   直接赋值会静默失败，需用 Object.defineProperty 覆盖，或把 createHash 挂到现有对象上。
+  function installCrypto() {
+    try {
+      if (typeof globalThis.crypto === 'undefined' || globalThis.crypto === null) {
+        globalThis.crypto = __crypto;
+        return;
+      }
+      if (typeof globalThis.crypto.createHash === 'function' && typeof globalThis.crypto.createHmac === 'function') {
+        // 已有完整 Node 风格 crypto，仅补缺失方法
+        globalThis.crypto.randomBytes = globalThis.crypto.randomBytes || __crypto.randomBytes;
+        globalThis.crypto.md5 = globalThis.crypto.md5 || __crypto.md5;
+        globalThis.crypto.sha1 = globalThis.crypto.sha1 || __crypto.sha1;
+        globalThis.crypto.sha256 = globalThis.crypto.sha256 || __crypto.sha256;
+        return;
+      }
+      // 现有 crypto 是 WebCrypto 或缺 createHash：尝试覆盖
+      try {
+        globalThis.crypto = __crypto;
+        // 验证是否覆盖成功
+        if (typeof globalThis.crypto.createHash !== 'function') throw new Error('crypto not writable');
+        return;
+      } catch (e) {
+        // 直接赋值失败（只读属性），尝试 defineProperty
+        try {
+          Object.defineProperty(globalThis, 'crypto', { value: __crypto, writable: true, configurable: true, enumerable: true });
+          if (typeof globalThis.crypto.createHash === 'function') return;
+        } catch (e2) {}
+        // 最后手段：把 createHash 等挂到现有 crypto 对象上
+        try {
+          globalThis.crypto.createHash = createHash;
+          globalThis.crypto.createHmac = createHmac;
+          globalThis.crypto.randomBytes = globalThis.crypto.randomBytes || __crypto.randomBytes;
+          globalThis.crypto.md5 = globalThis.crypto.md5 || __crypto.md5;
+          globalThis.crypto.sha1 = globalThis.crypto.sha1 || __crypto.sha1;
+          globalThis.crypto.sha256 = globalThis.crypto.sha256 || __crypto.sha256;
+        } catch (e3) {}
+      }
+    } catch (e) {
+      try { globalThis.crypto = __crypto; } catch (e2) {}
+    }
+  }
+  installCrypto();
+  globalThis.__crypto = __crypto;
+})();
+
+// ===== require polyfill（crypto / buffer / zlib）=====
+(function() {
+  var origRequire = (typeof require === 'function') ? require : null;
+  var __zlib = { gzip: function() { return null; }, gunzip: function() { return null; }, deflate: function() { return null; }, inflate: function() { return null; }, deflateRaw: function() { return null; }, inflateRaw: function() { return null; } };
+  globalThis.__zlib = __zlib;
+  try {
+    globalThis.require = function(name) {
+      name = String(name);
+      if (name === 'crypto' || name === 'node:crypto') return globalThis.__crypto;
+      if (name === 'buffer' || name === 'node:buffer') return { Buffer: globalThis.Buffer };
+      if (name === 'zlib' || name === 'node:zlib') return __zlib;
+      if (origRequire) return origRequire(name);
+      throw new Error('Module not found: ' + name);
+    };
+  } catch (e) {}
+})();
 
 // ===== console polyfill =====
 if (!globalThis.console) globalThis.console = {};
@@ -310,7 +582,11 @@ globalThis.console.info = globalThis.console.log;
 var __diag = [];
 __diag.push('fetch=' + (typeof fetch !== 'undefined'));
 __diag.push('Buffer=' + (typeof Buffer !== 'undefined'));
+__diag.push('Buffer.from=' + (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function'));
 __diag.push('crypto=' + (typeof crypto !== 'undefined'));
+__diag.push('crypto.createHash=' + (typeof crypto !== 'undefined' && typeof crypto.createHash === 'function'));
+__diag.push('require=' + (typeof require === 'function'));
+__diag.push('setTimeout=' + (typeof setTimeout !== 'undefined'));
 if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ level: 'info', msg: '[诊断] ' + __diag.join(', ') }));
 
 // ===== LX 协议接口（lx 与 musicApi 共享）=====
@@ -321,7 +597,7 @@ if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ l
   var lx = globalThis.lx;
   var musicApi = globalThis.musicApi;
 
-  lx.EVENT_NAMES = lx.EVENT_NAMES || { request: 'request', musicUrl: 'musicUrl', inited: 'inited', updateAlert: 'updateAlert' };
+  lx.EVENT_NAMES = lx.EVENT_NAMES || { request: 'request', musicUrl: 'musicUrl', inited: 'inited', updateAlert: 'updateAlert', search: 'search', hot: 'hot', lyric: 'lyric', pic: 'pic', getOtherSource: 'getOtherSource' };
   lx.env = lx.env || 'desktop';
   lx.version = lx.version || '2.0.0';
   lx.currentScriptInfo = lx.currentScriptInfo || { name: '', description: '', version: '', author: '', homepage: '', rawScript: '' };
@@ -391,12 +667,12 @@ if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ l
   function makeUtils(obj) {
     if (!obj.utils) obj.utils = {};
     obj.utils.crypto = {
-      md5: function(s) { try { return SYNC_CRYPTO.md5(String(s)); } catch (e) { return ''; } },
-      sha1: function(s) { try { return SYNC_CRYPTO.sha1(String(s)); } catch (e) { return ''; } },
-      sha256: function(s) { try { return SYNC_CRYPTO.sha256(String(s)); } catch (e) { return ''; } },
+      md5: function(s) { try { return __crypto.md5(String(s)); } catch (e) { return ''; } },
+      sha1: function(s) { try { return __crypto.sha1(String(s)); } catch (e) { return ''; } },
+      sha256: function(s) { try { return __crypto.sha256(String(s)); } catch (e) { return ''; } },
       // 若运行环境提供 Node crypto，优先使用（更可靠）
-      md5Native: function(s) { try { if (typeof crypto !== 'undefined' && crypto.createHash) return crypto.createHash('md5').update(s).digest('hex'); } catch (e) {} return SYNC_CRYPTO.md5(String(s)); },
-      randomBytes: function(n) { var arr = new Uint8Array(n); for (var i = 0; i < n; i++) arr[i] = Math.floor(Math.random() * 256); return arr; },
+      md5Native: function(s) { try { if (typeof crypto !== 'undefined' && crypto.createHash) return crypto.createHash('md5').update(s).digest('hex'); } catch (e) {} return __crypto.md5(String(s)); },
+      randomBytes: function(n) { try { return __crypto.randomBytes(n); } catch (e) { var arr = new Uint8Array(n); for (var i = 0; i < n; i++) arr[i] = Math.floor(Math.random() * 256); return arr; } },
       aesEncrypt: function() { return null; },
       rsaEncrypt: function() { return null; },
     };
@@ -670,8 +946,15 @@ async function requestMusicUrl(source: string, songId: string, quality: string):
     const result = await songloft.jsenv.executeWait(ENV_NAME, requestCode, 30000, ['musicUrl_result', 'musicUrl_error']);
     if (result.error) { logWarn(`音源请求执行错误: ${result.error}`); envReady = false; return null; }
     const consoleLogs = result.events.filter((e) => e.name === 'console_log');
+    const errorLogs: string[] = [];
+    const warnLogs: string[] = [];
     for (const cl of consoleLogs) {
-      try { const clData = JSON.parse(cl.data); if (clData.level === 'error' || clData.level === 'warn') logWarn(`[音源脚本] ${clData.msg}`); else logInfo(`[音源脚本] ${clData.msg}`); } catch { /* ignore */ }
+      try {
+        const clData = JSON.parse(cl.data);
+        if (clData.level === 'error') { logWarn(`[音源脚本] ${clData.msg}`); errorLogs.push(clData.msg); }
+        else if (clData.level === 'warn') { logWarn(`[音源脚本] ${clData.msg}`); warnLogs.push(clData.msg); }
+        else { logInfo(`[音源脚本] ${clData.msg}`); }
+      } catch { /* ignore */ }
     }
     const successEvent = result.events.find((e) => e.name === 'musicUrl_result');
     if (successEvent) {
@@ -690,6 +973,9 @@ async function requestMusicUrl(source: string, songId: string, quality: string):
         const errStack = data.stack ? ` | stack: ${data.stack.substring(0, 200)}` : '';
         logWarn(`音源解析失败: ${source}/${songId} - ${errMsg}${errStack}`);
         if (/no request handler/.test(errMsg)) logWarn('提示：脚本未注册 musicUrl/request 处理器，可能脚本格式与洛雪音源不兼容');
+        // 把错误信息和最近的警告日志一起返回，便于排查
+        (requestMusicUrl as unknown as { lastError?: string }).lastError =
+          [errMsg, ...warnLogs.slice(-3), ...errorLogs.slice(-3)].filter(Boolean).join(' | ');
         return null;
       } catch (e) { logWarn(`音源错误解析失败: ${String(e)}`); return null; }
     }
@@ -791,7 +1077,24 @@ export async function testCustomSources(sources: SourceDescriptor[]): Promise<{ 
 }
 
 /**
+ * 各平台测试歌曲 ID（用于音源检测，直接测试取 URL 能力）
+ *
+ * 选用各平台广为人知、长期存在的经典歌曲，避免因歌曲下架导致误判。
+ * 若某平台测试失败，说明音源脚本的该平台解析能力有问题（后端不可用 / 接口变更等）。
+ */
+const PROBE_SONG_IDS: Record<string, string> = {
+  kw: '3831661',        // 酷我 - 周杰伦 晴天
+  kg: 'FBB4665FE4F130F67F8E2A6E7B9C2D74', // 酷狗 - 周杰伦 晴天 (hash)
+  tx: '003OUlho2HcRHC',  // QQ音乐 - 周杰伦 晴天
+  wy: '186016',          // 网易云 - 周杰伦 晴天
+  mg: '60054700000',     // 咪咕 - 周杰伦 晴天
+};
+
+/**
  * 测试单个音源脚本：加载、初始化，并逐平台探测可用性（像洛雪音源插件一样逐源检测）
+ *
+ * 直接使用已知测试歌曲 ID 请求 URL，跳过搜索环节，
+ * 这样更准确反映音源脚本本身的取 URL 能力，避免因搜索 API 问题导致误判。
  *
  * @param desc 单个音源描述符
  * @returns 各平台状态 + 汇总消息
@@ -813,21 +1116,25 @@ export async function testSingleSource(desc: SourceDescriptor): Promise<{ status
     return { statuses, message: `脚本初始化失败: ${err.substring(0, 80)}`, ok: false };
   }
   const supported = supportedSources.length > 0 ? supportedSources : ALL_LX_SOURCES;
-  const PROBE_KEYWORD = '周杰伦 晴天';
   let okCount = 0;
   let testedCount = 0;
   for (const src of ALL_LX_SOURCES) {
     if (!supported.includes(src)) { set(src, 'unsupported', '脚本未启用该来源'); continue; }
     testedCount++;
+    const probeId = PROBE_SONG_IDS[src];
+    if (!probeId) { set(src, 'fail', '无测试歌曲ID'); continue; }
     try {
-      const found = await searchOnPlatform(PROBE_KEYWORD, src, 3);
-      if (!found || found.length === 0) { set(src, 'fail', '搜索无结果'); continue; }
-      const id = found[0].songId;
-      const url = await requestMusicUrl(src, id, '128k');
+      const url = await requestMusicUrl(src, probeId, '128k');
       if (url) { set(src, 'ok'); okCount++; }
       else {
+        const lastErr = (requestMusicUrl as unknown as { lastError?: string }).lastError || '';
         const backendUrls = extractBackendUrls(code);
-        set(src, 'fail', backendUrls.length > 0 ? `取URL失败（后端可能不可用: ${backendUrls.join(', ')}）` : '取URL失败（后端可能不可用）');
+        const reason = lastErr
+          ? `取URL失败: ${lastErr.substring(0, 100)}`
+          : backendUrls.length > 0
+            ? `取URL失败（后端可能不可用: ${backendUrls.join(', ')}）`
+            : '取URL失败（后端可能不可用）';
+        set(src, 'fail', reason);
       }
     } catch (e) { set(src, 'fail', `探测异常: ${String(e).slice(0, 60)}`); }
   }
