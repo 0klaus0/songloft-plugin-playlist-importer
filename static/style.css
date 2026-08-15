@@ -454,6 +454,30 @@ body {
   border-radius: var(--radius);
   background: var(--bg-input);
 }
+
+/* 导入到歌单名称输入 */
+.preview-import-name {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.preview-import-name label {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.preview-import-name .input {
+  width: 100%;
+}
+.preview-import-hint {
+  margin-top: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
 .track-item {
   display: flex;
   align-items: center;

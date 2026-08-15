@@ -531,6 +531,13 @@
 
     infoEl.innerHTML = html;
     tracksEl.innerHTML = tracksHtml;
+
+    // 填入默认歌单名（用户可修改）
+    var nameInput = $('import-playlist-name');
+    if (nameInput) {
+      nameInput.value = '[导入] ' + (playlist.name || '');
+    }
+
     show($('preview-section'));
   }
 
@@ -562,7 +569,13 @@
         streamingSongs: 0, downloadedSongs: 0,
       });
 
-      api('/import', 'POST', { text: text }).then(function (res) {
+      var payload = { text: text };
+      var nameInput = $('import-playlist-name');
+      if (nameInput && nameInput.value.trim()) {
+        payload.playlistName = nameInput.value.trim();
+      }
+
+      api('/import', 'POST', payload).then(function (res) {
         if (!res.success) {
           showToast(res.error || '导入失败', 'error');
           setImportBtnDisabled(false);

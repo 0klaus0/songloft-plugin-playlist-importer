@@ -393,7 +393,7 @@ router.post('/api/preview', async (req) => {
 
 /** POST /api/import — 导入歌单 */
 router.post('/api/import', async (req) => {
-  const body = parseBody<{ text: string; mode?: string }>(req.body);
+  const body = parseBody<{ text: string; mode?: string; playlistName?: string }>(req.body);
   if (!body.text || body.text.trim() === '') {
     return errorResponse('请输入分享链接或文字');
   }
@@ -441,7 +441,7 @@ router.post('/api/import', async (req) => {
   };
 
   // 异步执行导入
-  doImport(parsed.platform, parsed.playlistId, config).catch((e) => {
+  doImport(parsed.platform, parsed.playlistId, config, body.playlistName).catch((e) => {
     if (currentProgress) {
       currentProgress.status = 'error';
       currentProgress.message = `导入失败: ${String(e)}`;
@@ -498,7 +498,7 @@ router.post('/api/logs/clear', async () => {
 /**
  * 异步执行导入
  */
-async function doImport(platform: string, playlistId: string, config: PluginConfig): Promise<void> {
+async function doImport(platform: string, playlistId: string, config: PluginConfig, customPlaylistName?: string): Promise<void> {
   if (!currentProgress) return;
 
   try {
@@ -508,7 +508,7 @@ async function doImport(platform: string, playlistId: string, config: PluginConf
     const playlist: PlaylistInfo = await fetchPlaylist(platform as never, playlistId);
 
     // 步骤 2：导入
-    await importPlaylist(playlist, config, currentProgress);
+    await importPlaylist(playlist, config, currentProgress, customPlaylistName);
   } catch (e) {
     currentProgress.status = 'error';
     currentProgress.message = `导入失败: ${String(e)}`;

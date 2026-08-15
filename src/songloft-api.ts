@@ -334,7 +334,8 @@ interface ResolvedTrack {
 export async function importPlaylist(
   playlist: PlaylistInfo,
   config: PluginConfig,
-  progress: ImportProgress
+  progress: ImportProgress,
+  customPlaylistName?: string
 ): Promise<number | null> {
   progress.status = 'parsing';
   progress.phase = 'resolving';
@@ -348,7 +349,10 @@ export async function importPlaylist(
   progress.resolveCurrent = 0;
 
   // 创建或复用 Songloft 歌单（重复导入时复用同名歌单，实现增量导入）
-  const playlistName = `[导入] ${playlist.name}`;
+  // 优先使用用户指定的歌单名；否则使用默认的 "[导入] 原歌单名"
+  const playlistName = (customPlaylistName && customPlaylistName.trim())
+    ? customPlaylistName.trim()
+    : `[导入] ${playlist.name}`;
   logInfo(`查找或创建 Songloft 歌单: ${playlistName}`);
   let playlistId: number;
   let existingPlaylistSongs: Song[] = [];
