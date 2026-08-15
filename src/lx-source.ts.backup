@@ -1126,21 +1126,21 @@ const PROBE_SONG_IDS: Record<string, string> = {
  * @param desc 单个音源描述符
  * @returns 各平台状态 + 汇总消息
  */
-export async function testSingleSource(desc: SourceDescriptor): Promise<{ statuses: PlatformStatus[]; message: string; ok: boolean; score: number; total: number; okCount: number }> {
+export async function testSingleSource(desc: SourceDescriptor): Promise<{ statuses: PlatformStatus[]; message: string; ok: boolean }> {
   const statuses: PlatformStatus[] = ALL_LX_SOURCES.map((s) => ({ source: s, name: LX_SOURCE_NAMES[s], status: 'unreachable' as const }));
   const set = (src: LXSource, status: PlatformStatus['status'], reason?: string) => { const r = statuses.find((x) => x.source === src); if (r) { r.status = status; r.reason = reason; } };
 
   const code = await desc.load();
   if (!code) {
     for (const r of statuses) { r.status = 'unreachable'; r.reason = '脚本加载失败'; }
-    return { statuses, message: '脚本加载失败，请检查 URL 或上传文件', ok: false, score: 0, total: 0, okCount: 0 };
+    return { statuses, message: '脚本加载失败，请检查 URL 或上传文件', ok: false };
   }
   scriptCache.set(desc.name, code);
   const ok = await initEnv(code, desc.name);
   if (!ok) {
     const err = lastInitError || '未知错误';
     for (const r of statuses) { r.status = 'unreachable'; r.reason = '脚本初始化失败'; }
-    return { statuses, message: `脚本初始化失败: ${err.substring(0, 80)}`, ok: false, score: 0, total: 0, okCount: 0 };
+    return { statuses, message: `脚本初始化失败: ${err.substring(0, 80)}`, ok: false };
   }
   const supported = supportedSources.length > 0 ? supportedSources : ALL_LX_SOURCES;
   let okCount = 0;
@@ -1165,12 +1165,16 @@ export async function testSingleSource(desc: SourceDescriptor): Promise<{ status
       }
     } catch (e) { set(src, 'fail', `探测异常: ${String(e).slice(0, 60)}`); }
   }
-  const score = testedCount > 0 ? Math.round((okCount / testedCount) * 100) : 0;
   const msg = okCount > 0
-    ? `连通性检测：可用 ${okCount}/${testedCount} 个来源 (得分: ${score}%)`
+    ? `连通性检测：可用 ${okCount}/${testedCount} 个来源`
     : '所有来源取URL失败（音源后端可能不可用，请检查脚本硬编码的 API 地址）';
-  return { statuses, message: msg, ok: okCount > 0, score, total: testedCount, okCount };
+  return { statuses, message: msg, ok: okCount > 0 };
 }
+
+/**
+ * 按平台探测每个来源是否可用（像洛雪音源插件一样逐源检测）
+ * 使用第一个启用的音源脚本进行探测。
+ */
 export async function probePlatforms(sources: SourceDescriptor[]): Promise<PlatformStatus[]> {
   const valid = sources.filter((s) => s && s.name);
   if (valid.length === 0) {

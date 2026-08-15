@@ -726,45 +726,83 @@
   }
 
   // 单源测试：调用后端测试指定音源，并把结果渲染到平台状态网格
+  // 单源测试：调用后端测试指定音源，并把结果渲染到 modal
   function testSingleSource(idx, btn) {
     if (!btn) return;
     var originalHtml = btn.innerHTML;
     btn.disabled = true;
     btn.classList.add('testing');
     btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 11-6.22-8.56"/></svg>';
+    var modal = $('source-test-modal');
+    var modalResult = $('modal-test-result');
+    var modalGrid = $('modal-platform-grid');
     api('/sources/test', 'POST', { index: idx }).then(function (res) {
-      var resultEl = $('test-result');
-      if (resultEl) {
-        show(resultEl);
-        if (res.ok) {
-          resultEl.className = 'test-result success';
-          resultEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>' + escapeHtml(res.message || '连接正常');
-        } else {
-          resultEl.className = 'test-result fail';
-          resultEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + escapeHtml(res.message || '连接失败');
-        }
-      }
-      renderPlatformGrid(res.platforms);
-      // 在源卡片上标记测试结果
-      var card = btn.closest('.source-card');
-      if (card) {
-        card.classList.remove('src-ok', 'src-fail');
-        card.classList.add(res.ok ? 'src-ok' : 'src-fail');
-      }
-    }).catch(function (e) {
-      showToast('测试失败: ' + e, 'error');
-    }).finally(function () {
       btn.disabled = false;
       btn.classList.remove('testing');
       btn.innerHTML = originalHtml;
+      if (modal && modalResult && modalGrid) {
+        if (res.ok) {
+          modalResult.className = 'test-result success';
+          modalResult.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>' + escapeHtml(res.message || '连接正常');
+        } else {
+          modalResult.className = 'test-result fail';
+          modalResult.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + escapeHtml(res.message || '连接失败');
+        }
+        // 渲染平台状态网格到 modal
+        renderPlatformGridToModal(res.platforms, modalGrid);
+        // 显示 modal
+        modal.style.display = 'block';
+      }
+    }).catch(function (e) {
+      btn.disabled = false;
+      btn.classList.remove('testing');
+      btn.innerHTML = originalHtml;
+      showToast('测试失败: ' + e, 'error');
     });
   }
 
+  // 渲染平台状态网格到指定容器（用于 modal）
+  function renderPlatformGridToModal(platforms, container) {
+    if (!container) return;
+    if (!platforms || platforms.length === 0) {
+      container.innerHTML = '<div class="pf-empty">暂无检测数据</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < platforms.length; i++) {
+      var p = platforms[i];
+      var status = p.status || 'unreachable';
+      var statusText = PF_STATUS_TEXT[status] || status;
+      var reasonText = (status === 'fail' || status === 'unreachable') && p.reason ? p.reason : '';
+      html += '<div class="pf-item ' + status + '" title="' + escapeHtml(reasonText || statusText) + '">';
+      html += '<span class="pf-dot ' + status + '"></span>';
+      html += '<div class="pf-info">';
+      html += '<div class="pf-name">' + escapeHtml(p.name) + '</div>';
+      html += '<div class="pf-status">' + escapeHtml(reasonText || statusText) + '</div>';
+      html += '</div></div>';
+    }
+    container.innerHTML = html;
+  }
   // ==================== 初始化 ====================
   loadConfig();
   loadPlatforms();
   loadSources();
-
+  // 初始化音源检测 modal
+  var modal = $('source-test-modal');
+  if (modal) {
+    var closeBtn = modal.querySelector('.modal-header .close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function () {
+        modal.style.display = 'none';
+      });
+    }
+    // 点击背景关闭
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) {
+        modal.style.display = 'none';
+      }
+    });
+  }
   // 页面加载时检查是否有正在进行的导入任务
   api('/status', 'GET').then(function (res) {
     if (res.success && res.progress) {
