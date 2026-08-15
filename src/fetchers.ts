@@ -230,13 +230,19 @@ export async function searchNetease(keyword: string, limit = 10): Promise<Search
 
 /**
  * 抓取QQ音乐歌单
+ *
+ * 修复：原 fcg_ucc_getcdinfo_by_ls_cpdata.fcg 接口已失效（返回 404），
+ *       且 fcg_ucc_getcdinfo_byids_cp.fcg 会把新格式歌单 ID 截断返回错误歌单。
+ *       改用 c.y.qq.com/v8/fcg-bin/fcg_v8_playlist_cp.fcg?id={id}，
+ *       该接口对分享链接中的新格式 ID（如 3647891934）可直接返回正确歌单，
+ *       响应结构为 data.cdlist[0]（兼容旧版顶层 cdlist）。
  */
 export async function fetchQQMusicPlaylist(playlistId: string): Promise<PlaylistInfo> {
-  const url = `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_by_ls_cpdata.fcg?type=1&json=1&utf8=1&onlysong=0&disstid=${playlistId}&format=json`;
+  const url = `https://c.y.qq.com/v8/fcg-bin/fcg_v8_playlist_cp.fcg?id=${playlistId}&format=json&json=1&utf8=1&onlysong=0&type=1&inCharset=utf8&outCharset=utf-8&notice=0&platform=h5&needNewCode=1`;
   const resp = await fetchWithTimeout(url, {
     method: 'GET',
     headers: {
-      'Referer': 'https://y.qq.com/',
+      'Referer': `https://y.qq.com/n/ryqq/playlist/${playlistId}`,
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     },
   }, 15000);
@@ -254,11 +260,18 @@ export async function fetchQQMusicPlaylist(playlistId: string): Promise<Playlist
   }
 
   const data = safeJsonParse(body);
-  if (!data || !data.cdlist || !(data.cdlist as unknown[])[0]) {
+  if (!data) {
     throw new Error('QQ音乐歌单数据格式异常或歌单不存在');
   }
 
-  const cdlist = (data.cdlist as Record<string, unknown>[])[0];
+  // v8 接口返回结构为 data.cdlist[0]，兼容旧版顶层 cdlist
+  const rawList = (data.cdlist as Record<string, unknown>[]) ||
+    ((data.data as Record<string, unknown>)?.cdlist as Record<string, unknown>[]) || [];
+  const cdlist = rawList[0];
+  if (!cdlist) {
+    throw new Error('QQ音乐歌单数据格式异常或歌单不存在');
+  }
+
   const tracks: TrackInfo[] = ((cdlist.songlist as Record<string, unknown>[]) || []).map((s) => ({
     title: decodeHtmlEntities(s.songname as string || s.name as string || ''),
     artist: joinArtists(s.singer as { name?: string }[] | undefined),

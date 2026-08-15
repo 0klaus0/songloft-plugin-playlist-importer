@@ -1181,7 +1181,12 @@ body {
 
         <!-- 导入入口 -->
         <div class="source-actions">
-          <button id="btn-upload-script" class="src-action-btn src-action-upload" type="button">
+          <button id="btn-choose-file" class="src-action-btn src-action-upload" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+            <span>选择文件</span>
+          </button>
+          <span id="selected-file-name" class="selected-file-name"></span>
+          <button id="btn-upload-script" class="src-action-btn src-action-upload" type="button" disabled>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
             <span>上传脚本文件</span>
           </button>
@@ -1684,42 +1689,85 @@ body {
       .finally(function () { if (btn) btn.disabled = false; });
   }
 
-  // 上传脚本文件
+  // 选择脚本文件 — 打开文件选择对话框
+  if ($('btn-choose-file')) {
+    $('btn-choose-file').addEventListener('click', function () {
+      var input = $('cfg-source-file');
+      if (!input) return;
+      input.value = ''; // 重置以便能重复选择同一文件
+      input.click();
+    });
+  }
+
+  // 上传脚本文件 — 若未选择文件则先打开选择对话框
   if ($('btn-upload-script')) {
     $('btn-upload-script').addEventListener('click', function () {
       var input = $('cfg-source-file');
       if (!input) return;
       var file = input.files && input.files[0];
-      if (!file) { showToast('请先选择一个 .js 文件', 'error'); return; }
-      if (!/\.js$/i.test(file.name) && file.type !== 'application/javascript' && file.type !== 'text/javascript') {
-        showToast('请选择 .js 音源脚本文件', 'error');
+      if (!file) {
+        input.value = '';
+        input.click();
         return;
       }
-      var btn = $('btn-upload-script');
-      btn.disabled = true;
-      // 以原始字节发送（不包裹 JSON）
-      fetch(API_BASE + '/upload-source?name=' + encodeURIComponent(file.name), {
-        method: 'POST',
-        body: file,
-      }).then(function (r) {
-        return r.text().then(function (text) {
-          if (!text) throw new Error('空响应');
-          return JSON.parse(text);
-        });
-      }).then(function (res) {
-        if (!res.success) throw new Error(res.error || '上传失败');
-        // 将上传的脚本加入配置
-        var cs = currentCustomSources();
-        cs.push({ kind: 'file', value: res.id, name: res.name });
-        return api('/config', 'POST', { customSources: cs });
-      }).then(function (res) {
-        if (!res.success) throw new Error(res.error || '保存失败');
-        input.value = '';
-        showToast('脚本已上传并添加');
-        loadSources();
-      }).catch(function (e) { showToast('上传失败: ' + e, 'error'); })
-        .finally(function () { btn.disabled = false; });
+      uploadSelectedScript(input);
     });
+  }
+
+  // 文件选择后显示文件名并启用上传按钮
+  if ($('cfg-source-file')) {
+    $('cfg-source-file').addEventListener('change', function () {
+      var input = this;
+      var file = input.files && input.files[0];
+      var nameEl = $('selected-file-name');
+      var btn = $('btn-upload-script');
+      if (!file) {
+        if (nameEl) nameEl.textContent = '';
+        if (btn) btn.disabled = true;
+        return;
+      }
+      if (!/\.js$/i.test(file.name) && file.type !== 'application/javascript' && file.type !== 'text/javascript') {
+        showToast('请选择 .js 音源脚本文件', 'error');
+        input.value = '';
+        if (nameEl) nameEl.textContent = '';
+        if (btn) btn.disabled = true;
+        return;
+      }
+      if (nameEl) nameEl.textContent = file.name;
+      if (btn) btn.disabled = false;
+    });
+  }
+
+  // 执行上传
+  function uploadSelectedScript(input) {
+    var file = input.files && input.files[0];
+    if (!file) return;
+    var btn = $('btn-upload-script');
+    btn.disabled = true;
+    // 以原始字节发送（不包裹 JSON）
+    fetch(API_BASE + '/upload-source?name=' + encodeURIComponent(file.name), {
+      method: 'POST',
+      body: file,
+    }).then(function (r) {
+      return r.text().then(function (text) {
+        if (!text) throw new Error('空响应');
+        return JSON.parse(text);
+      });
+    }).then(function (res) {
+      if (!res.success) throw new Error(res.error || '上传失败');
+      // 将上传的脚本加入配置
+      var cs = currentCustomSources();
+      cs.push({ kind: 'file', value: res.id, name: res.name });
+      return api('/config', 'POST', { customSources: cs });
+    }).then(function (res) {
+      if (!res.success) throw new Error(res.error || '保存失败');
+      input.value = '';
+      var nameEl = $('selected-file-name');
+      if (nameEl) nameEl.textContent = '';
+      showToast('脚本已上传并添加');
+      loadSources();
+    }).catch(function (e) { showToast('上传失败: ' + e, 'error'); })
+      .finally(function () { btn.disabled = false; });
   }
 
   // ==================== 音源模式切换 ====================

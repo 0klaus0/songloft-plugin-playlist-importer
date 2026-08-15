@@ -658,6 +658,26 @@ body {
   color: var(--accent);
   background: var(--accent-soft);
 }
+.src-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.src-action-btn:disabled:hover {
+  border-color: var(--border);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+.selected-file-name {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  padding: 0 4px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .src-action-upload svg { color: var(--cyan); }
 .src-action-url svg { color: var(--accent); }
 

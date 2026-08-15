@@ -40,6 +40,7 @@ const MATCH_RULES: MatchRule[] = [
     patterns: [
       /y\.qq\.com\/.*playlist/i,
       /y\.qq\.com\/.*playsquare/i,
+      /y\.qq\.com\/.*taoge/i, // 旧版分享页 taoge.html
       /c\.y\.qq\.com\/.*playlist/i,
       /url\.cn\//i, // QQ短链接
     ],
