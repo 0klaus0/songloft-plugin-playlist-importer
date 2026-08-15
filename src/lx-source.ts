@@ -51,6 +51,20 @@ let envReady = false;
 let lastInitError: string = '';
 
 /**
+ * 环境初始化互斥锁：串行化 initEnv，避免导入流程与源检测并发时
+ * 同时创建/销毁同一个 jsenv 环境（jsenv.create 重名会 reject）。
+ */
+let initLock: Promise<unknown> = Promise.resolve();
+
+/** 串行执行：前一个 initEnv 完成后才执行下一个 */
+function withInitLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = initLock.then(fn, fn);
+  // 无论成功失败都重置锁，避免锁永久卡死
+  initLock = run.catch(() => undefined);
+  return run;
+}
+
+/**
  * lx 全局对象的初始化代码（注入到 jsenv 子环境中）
  *
  * ★ 修复：同时创建 lx 与 musicApi 两个全局（共享同一套实现），
@@ -786,9 +800,17 @@ async function downloadScript(url: string): Promise<string | null> {
 }
 
 /**
- * 初始化 jsenv 环境并加载音源脚本内容
+ * 初始化 jsenv 环境并加载音源脚本内容（加锁入口）
+ *
+ * 通过 withInitLock 串行化，避免导入流程与源检测并发时
+ * 同时创建/销毁同一个 jsenv 环境导致 already exists / 环境被误销毁。
  */
 async function initEnv(scriptCode: string, name: string): Promise<boolean> {
+  return withInitLock(() => initEnvInner(scriptCode, name));
+}
+
+/** initEnv 的实际实现（必须在锁内执行） */
+async function initEnvInner(scriptCode: string, name: string): Promise<boolean> {
   if (envReady && loadedScriptName === name) {
     logInfo(`音源环境已就绪，复用现有环境: ${name.substring(0, 60)}...`);
     return true;
@@ -796,9 +818,14 @@ async function initEnv(scriptCode: string, name: string): Promise<boolean> {
   logInfo(`initEnv: envReady=${envReady}, loadedScriptName=${loadedScriptName ? loadedScriptName.substring(0, 40) : 'null'}, name=${name.substring(0, 40)}...`);
   if (!scriptCode || scriptCode.length < 100) { logWarn('音源脚本内容过短或为空，可能无效'); lastInitError = '脚本内容过短'; return false; }
   try {
+    // 始终尝试销毁已有环境，避免 envReady 标志与实际环境状态不同步
+    // （例如之前导入/检测过程中创建了环境但标志被重置，导致 jsenv.create 报 already exists）
     if (envReady) {
       try { await songloft.jsenv.destroy(ENV_NAME); } catch { /* ignore */ }
       envReady = false; loadedScriptName = null;
+    } else {
+      // envReady=false 时也尝试销毁，忽略不存在的情况
+      try { await songloft.jsenv.destroy(ENV_NAME); } catch { /* ignore */ }
     }
     logInfo('创建 jsenv 子环境...');
     await songloft.jsenv.create(ENV_NAME, LX_INIT_CODE);
