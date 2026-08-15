@@ -1,8 +1,10 @@
 {
+  "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
   "name": "歌单导入器",
   "version": "1.12.0",
   "description": "识别市面音乐软件分享歌单，导入至 Songloft 或通过洛雪音源下载",
   "author": "0klaus0",
+  "homepage": "https://github.com/0klaus0/songloft-plugin-playlist-importer",
   "license": "Apache-2.0",
   "entryPath": "playlist-importer",
   "main": "main.js",
@@ -19,5 +21,9 @@
   ],
   "publicPaths": ["/api"],
   "icon": "icon.jpg",
-  "renderEngine": "webview"
+  "renderEngine": "webview",
+  "updateUrl": "https://github.com/0klaus0/songloft-plugin-playlist-importer/raw/main/plugin.json",
+  "download_url": "https://github.com/0klaus0/songloft-plugin-playlist-importer/releases/download/v1.12.0/playlist-importer.jsplugin.zip",
+  "entryHash": "b8850d8d4f6a74201c0399256a73a1929aaa0d40a2f0a0e492eab8870b85aad7",
+  "zipHash": "dc0d7995246935b8ed6d907a834f4d47ae6deab65c242813818299c5dc782d93"
 }
