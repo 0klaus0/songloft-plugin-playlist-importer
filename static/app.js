@@ -147,6 +147,10 @@
       if (s.version) html += '<span class="src-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>v' + escapeHtml(s.version) + '</span>';
       if (s.kind === 'file') html += '<span class="src-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>本地脚本</span>';
       html += '</div>';
+      if (s.testScore !== undefined) {
+        var scoreColor = s.testScore >= 80 ? '#34d399' : (s.testScore >= 50 ? '#fbc02d' : '#f87171');
+        html += '<span class="src-score" style="background:' + scoreColor + ';color:#fff;padding:2px 6px;border-radius:10px;font-size:var(--font-size-xs);margin-left:8px;">' + s.testScore + '%</span>';
+      }
       if (s.platforms && s.platforms.length > 0) {
         html += '<div class="source-platforms">';
         for (var p = 0; p < s.platforms.length; p++) {
