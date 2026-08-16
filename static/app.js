@@ -741,12 +741,29 @@
       btn.classList.remove('testing');
       btn.innerHTML = originalHtml;
       if (modal && modalResult && modalGrid) {
+        // 计算得分
+        var platforms = res.platforms || [];
+        var total = platforms.length;
+        var okCount = 0;
+        for (var i = 0; i < total; i++) {
+          if (platforms[i].status === 'ok') okCount++;
+        }
+        var score = total > 0 ? Math.round((okCount / total) * 100) : 0;
+        // 更新来源对象的测试结果
+        if (sources && sources[idx]) {
+          sources[idx].testScore = score;
+          sources[idx].testStatus = res.ok ? 'ok' : 'fail';
+          sources[idx].testMessage = res.message || '';
+          // 更新源卡片UI（可选：重新渲染列表以显示得分）
+          renderSourceList();
+        }
+        var msg = '连通性检测：可用 ' + okCount + '/' + total + ' 个来源 (得分: ' + score + '%)';
         if (res.ok) {
           modalResult.className = 'test-result success';
-          modalResult.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>' + escapeHtml(res.message || '连接正常');
+          modalResult.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>' + escapeHtml(msg);
         } else {
           modalResult.className = 'test-result fail';
-          modalResult.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + escapeHtml(res.message || '连接失败');
+          modalResult.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + escapeHtml(msg);
         }
         // 渲染平台状态网格到 modal
         renderPlatformGridToModal(res.platforms, modalGrid);
@@ -760,7 +777,6 @@
       showToast('测试失败: ' + e, 'error');
     });
   }
-
   // 渲染平台状态网格到指定容器（用于 modal）
   function renderPlatformGridToModal(platforms, container) {
     if (!container) return;
