@@ -804,21 +804,23 @@
   loadPlatforms();
   loadSources();
   // 初始化音源检测 modal
-  var modal = $('source-test-modal');
-  if (modal) {
-    var closeBtn = modal.querySelector('.modal-header .close');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', function () {
-        modal.style.display = 'none';
+  document.addEventListener('DOMContentLoaded', function () {
+    var modal = $('source-test-modal');
+    if (modal) {
+      var closeBtn = modal.querySelector('.modal-header .close');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', function () {
+          modal.style.display = 'none';
+        });
+      }
+      // 点击背景关闭
+      modal.addEventListener('click', function (e) {
+        if (e.target === modal) {
+          modal.style.display = 'none';
+        }
       });
     }
-    // 点击背景关闭
-    modal.addEventListener('click', function (e) {
-      if (e.target === modal) {
-        modal.style.display = 'none';
-      }
-    });
-  }
+  });
   // 页面加载时检查是否有正在进行的导入任务
   api('/status', 'GET').then(function (res) {
     if (res.success && res.progress) {

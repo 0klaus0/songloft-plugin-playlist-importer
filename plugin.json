@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
   "name": "\u6b4c\u5355\u5bfc\u5165\u5668",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "\u8bc6\u522b\u5e02\u9762\u97f3\u4e50\u8f6f\u4ef6\u5206\u4eab\u6b4c\u5355\uff0c\u5bfc\u5165\u81f3 Songloft \u6216\u901a\u8fc7\u6d1b\u96ea\u97f3\u6e90\u4e0b\u8f7d",
   "author": "0klaus0",
   "homepage": "https://github.com/0klaus0/songloft-plugin-playlist-importer",
@@ -25,7 +25,7 @@
   "icon": "icon.jpg",
   "renderEngine": "webview",
   "updateUrl": "https://github.com/0klaus0/songloft-plugin-playlist-importer/raw/main/plugin.json",
-  "download_url": "https://github.com/0klaus0/songloft-plugin-playlist-importer/releases/download/v1.14.0/playlist-importer.jsplugin.zip",
+  "download_url": "https://github.com/0klaus0/songloft-plugin-playlist-importer/releases/download/v1.16.0/playlist-importer.jsplugin.zip",
   "entryHash": "c1463096ce08f613836c71c5765fad0ca483ad5d6a485970078b44a30a9dcd29",
-  "zipHash": "46c9feaa7fac7bdce4dd5c17c170b7533e70d5fb0f85a0031d71beddd5f0c435"
+  "zipHash": "18e5a3cdf4d29a6b934c0c40ceabbe7d3a2ab1ca7d3305bcb6a5a963c0d8fada"
 }
