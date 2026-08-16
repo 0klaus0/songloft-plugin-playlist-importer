@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
-  "name": "\u6b4c\u5355\u5bfc\u5165\u5668",
-  "version": "1.17.0",
-  "description": "\u8bc6\u522b\u5e02\u9762\u97f3\u4e50\u8f6f\u4ef6\u5206\u4eab\u6b4c\u5355\uff0c\u5bfc\u5165\u81f3 Songloft \u6216\u901a\u8fc7\u6d1b\u96ea\u97f3\u6e90\u4e0b\u8f7d",
+  "name": "歌单导入器",
+  "version": "1.19.0",
+  "description": "识别市面音乐软件分享歌单，导入至 Songloft 或通过洛雪音源下载",
   "author": "0klaus0",
   "homepage": "https://github.com/0klaus0/songloft-plugin-playlist-importer",
   "license": "Apache-2.0",
@@ -19,13 +19,11 @@
     "fs",
     "jsenv"
   ],
-  "publicPaths": [
-    "/api"
-  ],
+  "publicPaths": ["/api"],
   "icon": "icon.jpg",
   "renderEngine": "webview",
   "updateUrl": "https://github.com/0klaus0/songloft-plugin-playlist-importer/raw/main/plugin.json",
-  "download_url": "https://github.com/0klaus0/songloft-plugin-playlist-importer/releases/download/v1.17.0/playlist-importer.jsplugin.zip",
+  "download_url": "https://github.com/0klaus0/songloft-plugin-playlist-importer/releases/download/v1.19.0/playlist-importer.jsplugin.zip",
   "entryHash": "c1463096ce08f613836c71c5765fad0ca483ad5d6a485970078b44a30a9dcd29",
-  "zipHash": "e5731976109a8aa4fe68aa95232ab17369b00a7fa39b8b6d212ee9ff44b86b64"
+  "zipHash": "582e736c36be426685c7249e64beb2c23ec06c82e37af89080610add57b07b23"
 }
