@@ -4,8 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>歌单导入器</title>
-  <style>
-/* ==================== Design Tokens ==================== */
+  <style>/* ==================== Design Tokens ==================== */
 :root {
   --bg-base: #0a0e1a;
   --bg-surface: #121829;
@@ -461,6 +460,30 @@ body {
   border-radius: var(--radius);
   background: var(--bg-input);
 }
+
+/* 导入到歌单名称输入 */
+.preview-import-name {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.preview-import-name label {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.preview-import-name .input {
+  width: 100%;
+}
+.preview-import-hint {
+  margin-top: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
 .track-item {
   display: flex;
   align-items: center;
@@ -664,6 +687,26 @@ body {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+}
+.src-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.src-action-btn:disabled:hover {
+  border-color: var(--border);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+.selected-file-name {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  padding: 0 4px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .src-action-upload svg { color: var(--cyan); }
 .src-action-url svg { color: var(--accent); }
@@ -946,6 +989,74 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.pf-latency {
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* ==================== 检测弹窗：星级评分 + 诊断日志 ==================== */
+.star-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+}
+.star-line .sl-stars {
+  display: inline-flex;
+  gap: 2px;
+  color: #fbbf24;
+  fill: #fbbf24;
+  flex-shrink: 0;
+}
+.star-line .sl-stars svg { width: 16px; height: 16px; }
+.star-line .sl-stars .off { color: var(--border); fill: var(--border); }
+.star-line .sl-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.star-line .sl-count {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.diag-wrap { margin-top: 8px; }
+.diag-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.diag-toggle:hover { color: var(--text-primary); border-color: var(--accent); }
+.diag-log {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-soft);
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.dl-error { color: #f87171; }
+.dl-warn { color: #fbbf24; }
+.dl-default { color: var(--text-muted); }
 
 /* ==================== Toast ==================== */
 .toast {
@@ -1058,6 +1169,192 @@ body {
   }
 }
 
+/* ==================== Modal ==================== */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0,0,0,0.4);
+}
+.modal-content {
+  background-color: var(--bg-elevated);
+  margin: 10% auto;
+  padding: 20px;
+  border: 1px solid var(--border);
+  width: 80%;
+  max-width: 500px;
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.modal-header .title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.modal-header .close {
+  cursor: pointer;
+  font-size: var(--font-size-lg);
+  color: var(--text-muted);
+}
+.modal-header .close:hover {
+  color: var(--text-danger);
+}
+.modal-body {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  max-height: 62vh;
+  overflow-y: auto;
+}
+
+/* ===== 多来源检测弹窗（类似洛雪逐源检测） ===== */
+.sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.sdc-card {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  padding: 10px 12px;
+  text-align: left;
+}
+.sdc-card.sdc-ok { border-left: 3px solid var(--success); }
+.sdc-card.sdc-fail { border-left: 3px solid var(--error); }
+.sdc-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sdc-badge {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sdc-badge.ok { color: var(--success); background: var(--success-soft); }
+.sdc-badge.fail { color: var(--error); background: var(--error-soft); }
+.sdc-badge svg { width: 13px; height: 13px; }
+.sdc-meta { flex: 1; min-width: 0; }
+.sdc-line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sdc-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+.sdc-score {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--accent);
+}
+.sdc-count {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.sdc-stars {
+  display: inline-flex;
+  gap: 1px;
+  color: #fbbf24;
+  fill: #fbbf24;
+  margin-top: 2px;
+}
+.sdc-stars svg { width: 13px; height: 13px; }
+.sdc-stars .off { color: var(--border); fill: var(--border); }
+.sdc-err {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
+  background: var(--error-soft);
+  color: var(--error);
+  font-size: var(--font-size-xs);
+}
+.sdc-platforms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.sdc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+.sdc-chip-name { color: var(--text-primary); }
+.sdc-chip-status.ok { color: var(--success); }
+.sdc-chip-status.fail { color: var(--error); }
+.sdc-chip-status.unsupported,
+.sdc-chip-status.unreachable { color: var(--text-muted); }
+.sdc-lat {
+  font-family: var(--font-mono, monospace);
+  color: var(--cyan);
+  background: var(--cyan-soft);
+  border-radius: 8px;
+  padding: 0 4px;
+}
+.sdc-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+.sdc-diag-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.sdc-diag-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.sdc-diag {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-soft);
+}
+.sdc-diag-log {
+  max-height: 180px;
+  overflow-y: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.src-score {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: var(--font-size-xs);
+}
 </style>
 </head>
 <body>
