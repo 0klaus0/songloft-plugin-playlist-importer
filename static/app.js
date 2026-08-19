@@ -423,14 +423,16 @@
     });
   }
 
-  // ==================== 测试洛雪连接 ====================
+  // ==================== 测试洛雪连接（增强详细检测，类似洛雪逐源检测） ====================
+  var ICON_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>';
+  var ICON_FAIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
   if ($('btn-test')) {
     $('btn-test').addEventListener('click', function () {
       var btn = $('btn-test');
       btn.disabled = true;
       var spanEl = btn.querySelector('span');
       var originalText = spanEl ? spanEl.textContent : '测试连接';
-      if (spanEl) spanEl.textContent = '测试中...';
+      if (spanEl) spanEl.textContent = '检测中...';
       var resultEl = $('test-result');
       hide(resultEl);
 
@@ -444,21 +446,29 @@
         defaultQuality: $('cfg-quality') ? $('cfg-quality').value : '320k',
       };
       api('/config', 'POST', config).then(function () {
-        return api('/test-luoxue', 'POST');
+        return api('/test-all-detail', 'POST', {});
       }).then(function (res) {
         show(resultEl);
-        if (res.ok) {
+        if (res.ok || (res.totOk || 0) > 0) {
           resultEl.className = 'test-result success';
-          resultEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>' + escapeHtml(res.message || '连接正常');
+          resultEl.innerHTML = ICON_OK + escapeHtml(res.msg || '连接正常');
         } else {
           resultEl.className = 'test-result fail';
-          resultEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + escapeHtml(res.message || '连接失败');
+          resultEl.innerHTML = ICON_FAIL + escapeHtml(res.msg || '无可用的音源脚本');
         }
-        renderPlatformGrid(res.platforms);
+        showTestAllModal(res);
+        var all = [];
+        if (res.sources) {
+          for (var i = 0; i < res.sources.length; i++) {
+            var sts = res.sources[i].statuses || [];
+            for (var j = 0; j < sts.length; j++) all.push(sts[j]);
+          }
+        }
+        renderPlatformGrid(all);
       }).catch(function (e) {
         show(resultEl);
         resultEl.className = 'test-result fail';
-        resultEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>测试失败: ' + escapeHtml(String(e));
+        resultEl.innerHTML = ICON_FAIL + escapeHtml('测试失败: ' + String(e));
       }).finally(function () {
         btn.disabled = false;
         if (spanEl) spanEl.textContent = originalText;
@@ -819,6 +829,105 @@
     var p = 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z';
     var o = half ? 'style="opacity:0.5"' : '';
     return '<svg class="' + cls + '" viewBox="0 0 24 24" ' + o + '><path d="' + p + '"/></svg>';
+  }
+  function starLineSvg(starScore) {
+    var h = '';
+    var full = Math.floor(starScore);
+    var half = (starScore - full) >= 0.5;
+    var empty = 5 - full - (half ? 1 : 0);
+    for (var a = 0; a < full; a++) h += starSvg('');
+    if (half) h += starSvg('', true);
+    for (var b = 0; b < empty; b++) h += starSvg(' off');
+    return h;
+  }
+  // 渲染单个来源的检测结果卡片（用于多来源弹窗）
+  function renderSrcCard(s) {
+    var ok = !!s.ok;
+    var starHtml = starLineSvg(s.starScore !== undefined ? s.starScore : 0);
+    var phtml = '';
+    var sts = s.statuses || [];
+    for (var p = 0; p < sts.length; p++) {
+      var st = sts[p];
+      var stText = PF_STATUS_TEXT[st.status] || st.status;
+      var lat = (st.latencyMs !== undefined) ? '<span class="sdc-lat">' + st.latencyMs + 'ms</span>' : '';
+      var reason = (st.status === 'fail' || st.status === 'unreachable') && st.reason ? st.reason : '';
+      phtml += '<span class="sdc-chip ' + (st.status || '') + '" title="' + escapeHtml(reason || stText) + '"><span class="sdc-chip-name">' + escapeHtml(st.name) + '</span><span class="sdc-chip-status ' + (st.status || '') + '">' + escapeHtml(stText) + '</span>' + lat + '</span>';
+    }
+    var logs = s.logs || [];
+    var diagBlock = '';
+    var diagBtn = '';
+    if (logs.length > 0) {
+      var lhtml = '';
+      for (var li = 0; li < logs.length; li++) {
+        var l = logs[li];
+        var cls = 'dl-default';
+        if (/\[error\]/.test(l)) cls = 'dl-error';
+        else if (/\[warn\]/.test(l)) cls = 'dl-warn';
+        lhtml += '<div class="' + cls + '">' + escapeHtml(l) + '</div>';
+      }
+      diagBlock = '<div class="sdc-diag hidden"><div class="sdc-diag-log">' + lhtml + '</div></div>';
+      diagBtn = '<button type="button" class="sdc-diag-btn">诊断日志 (' + logs.length + ')</button>';
+    }
+    var errNote = (!ok && s.initError) ? '<div class="sdc-err">' + escapeHtml(s.initError) + '</div>' : '';
+    return '<div class="sdc-card ' + (ok ? 'sdc-ok' : 'sdc-fail') + '">' +
+      '<div class="sdc-head">' +
+        '<span class="sdc-badge ' + (ok ? 'ok' : 'fail') + '">' + (ok ? ICON_OK : ICON_FAIL) + '</span>' +
+        '<div class="sdc-meta">' +
+          '<div class="sdc-line1"><span class="sdc-name">' + escapeHtml(s.name) + '</span><span class="sdc-score">' + (s.score || 0) + ' 分</span><span class="sdc-count">' + (s.okCount || 0) + '/' + (s.testedCount || 0) + ' 可用</span></div>' +
+          '<div class="sdc-stars">' + starHtml + '</div>' +
+        '</div>' +
+      '</div>' +
+      errNote +
+      (phtml ? '<div class="sdc-platforms">' + phtml + '</div>' : '') +
+      (diagBtn ? '<div class="sdc-actions">' + diagBtn + '</div>' : '') +
+      diagBlock +
+    '</div>';
+  }
+  // 主"测试连接"：多来源增强检测弹窗（整体星级 + 逐源卡）
+  function showTestAllModal(data) {
+    var modal = $('source-test-modal');
+    if (!modal) return;
+    resolveModalHandlers();
+    var srcs = data.sources || [];
+    var modalResult = $('modal-test-result');
+    if (modalResult) {
+      modalResult.className = 'test-result ' + ((data.ok || (data.totOk || 0) > 0) ? 'success' : 'fail');
+      modalResult.innerHTML = ((data.ok || (data.totOk || 0) > 0) ? ICON_OK : ICON_FAIL) + escapeHtml(data.msg || '');
+    }
+    var starLine = $('modal-starline');
+    if (starLine) {
+      starLine.className = 'star-line';
+      starLine.innerHTML = '<span class="sl-stars">' + starLineSvg(data.starScore !== undefined ? data.starScore : 0) + '</span><span class="sl-text">' + (data.score || 0) + ' 分</span><span class="sl-count">' + (data.totOk || 0) + '/' + (data.totTested || 0) + ' 个音源可用</span>';
+    }
+    var listEl = $('modal-sources-list');
+    if (listEl) {
+      var html = '';
+      if (srcs.length === 0) {
+        html = '<div class="pf-empty">未启用任何音源脚本，或检测结果为空</div>';
+      } else {
+        for (var i = 0; i < srcs.length; i++) html += renderSrcCard(srcs[i]);
+      }
+      listEl.innerHTML = html;
+      if (!listEl.__diagBound) {
+        listEl.__diagBound = true;
+        listEl.addEventListener('click', function (ev) {
+          var t = ev.target;
+          if (t && t.classList && t.classList.contains('sdc-diag-btn')) {
+            var card = t.closest('.sdc-card');
+            if (card) {
+              var d = card.querySelector('.sdc-diag');
+              if (d) {
+                var isHidden = d.classList.contains('hidden');
+                d.classList.toggle('hidden');
+                var n = d.querySelector('.sdc-diag-log') ? d.querySelector('.sdc-diag-log').children.length : 0;
+                if (t) t.textContent = isHidden ? '隐藏诊断日志' : '诊断日志 (' + n + ')';
+              }
+            }
+          }
+        });
+      }
+    }
+    modal.style.display = 'block';
   }
   // 绑定一次弹窗关闭/日志切换事件（避免重复绑定）
   var __modalHandlersBound = false;

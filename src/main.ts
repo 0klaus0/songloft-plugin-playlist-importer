@@ -355,6 +355,74 @@ router.post('/api/sources/test-detail', async (req) => {
   return jsonResponse({ success: true, ...result, sourceIndex: idx });
 });
 
+/**
+ * POST /api/test-all-detail — 详细检测所有启用的自定义音源（用于主"测试连接"按钮）
+ * 逐个来源返回平台延迟、评分、诊断日志并汇总，类似洛雪音源插件的逐源检测。
+ */
+router.post('/api/test-all-detail', async () => {
+  const config = await getConfig();
+  const sources = config.customSources || [];
+  const enabled = sources
+    .map((s, i) => ({ s, i }))
+    .filter((x) => x.s.enabled !== false);
+
+  const summaries: Array<{
+    index: number;
+    name: string;
+    ok: boolean;
+    score: number;
+    starScore: number;
+    okCount: number;
+    testedCount: number;
+    statuses: ReturnType<typeof testSingleSourceDetailed>['statuses'];
+    logs: string[];
+    initError?: string;
+  }> = [];
+
+  let totOk = 0;
+  let totTested = 0;
+  for (const { s, i } of enabled) {
+    const desc: SourceDescriptor = {
+      name: s.name || s.value,
+      load: () => loadSourceContent(s),
+    };
+    logInfo(`开始详细检测音源: ${s.name || s.value}`);
+    const r = await testSingleSourceDetailed(desc);
+    totOk += r.okCount;
+    totTested += r.testedCount;
+    summaries.push({
+      index: i,
+      name: r.name,
+      ok: r.ok,
+      score: r.score,
+      starScore: r.starScore,
+      okCount: r.okCount,
+      testedCount: r.testedCount,
+      statuses: r.statuses,
+      logs: r.logs,
+      initError: r.initError,
+    });
+  }
+  logInfo(`全部音源详细检测完成: 可用=${totOk}/${totTested}`);
+
+  const overallScore = totTested > 0 ? Math.round((totOk / totTested) * 100) : 0;
+  const overallStar = totTested > 0 ? Math.round((totOk / totTested) * 50) / 10 : 0;
+  const msg = totTested > 0
+    ? `连通性检测：可用 ${totOk}/${totTested} 个来源 (得分: ${overallScore}%)`
+    : '未启用任何音源脚本';
+
+  return jsonResponse({
+    success: true,
+    sources: summaries,
+    totOk,
+    totTested,
+    ok: totOk > 0,
+    score: overallScore,
+    starScore: overallStar,
+    msg,
+  });
+});
+
 /** POST /api/parse — 解析分享链接 */
 router.post('/api/parse', async (req) => {
   const body = parseBody<{ text: string }>(req.body);
