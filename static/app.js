@@ -752,6 +752,9 @@
     btn.disabled = true;
     btn.classList.add('testing');
     btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 11-6.22-8.56"/></svg>';
+    // 先立即弹出检测弹窗，显示"检测中"状态，再后台发起检测
+    resolveModalHandlers();
+    showTestModalLoading(1);
     var modal = $('source-test-modal');
     var modalResult = $('modal-test-result');
     var modalGrid = $('modal-platform-grid');
@@ -759,7 +762,6 @@
     var diagWrap = $('modal-diag-wrap');
     var diagLog = $('modal-diag-log');
     var diagToggle = $('modal-diag-toggle');
-    resolveModalHandlers();
     api('/sources/test-detail', 'POST', { index: idx }).then(function (res) {
       btn.disabled = false;
       btn.classList.remove('testing');
@@ -827,6 +829,7 @@
       btn.classList.remove('testing');
       btn.innerHTML = originalHtml;
       showToast('检测失败: ' + e, 'error');
+      showTestModalError(String(e));
     });
   }
   // 生成星级 SVG
