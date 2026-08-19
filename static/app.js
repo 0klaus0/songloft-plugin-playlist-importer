@@ -257,7 +257,7 @@
   // 当前音源列表（用于保存配置）
   function currentCustomSources() {
     return sources.map(function (s) {
-      return { kind: s.kind, value: s.value, name: s.name };
+      return { kind: s.kind, value: s.value, name: s.name, enabled: s.enabled !== false };
     });
   }
 

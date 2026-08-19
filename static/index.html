@@ -1939,7 +1939,7 @@ body {
   // 当前音源列表（用于保存配置）
   function currentCustomSources() {
     return sources.map(function (s) {
-      return { kind: s.kind, value: s.value, name: s.name };
+      return { kind: s.kind, value: s.value, name: s.name, enabled: s.enabled !== false };
     });
   }
 
@@ -2536,7 +2536,6 @@ body {
     if (diagWrap) diagWrap.className = 'diag-wrap hidden';
     modal.style.display = 'block';
   }
-  // 检测弹窗：检测出错时显示错误
   function showTestModalError(err) {
     var modal = $('source-test-modal');
     if (!modal) return;
@@ -2667,6 +2666,16 @@ body {
       }
     }
     modal.style.display = 'block';
+    // 汇总所有来源的平台状态渲染到弹窗下方网格，并清掉"检测中"残留
+    var modalGrid = $('modal-platform-grid');
+    var allP = [];
+    for (var gi = 0; gi < srcs.length; gi++) {
+      var gSts = (srcs[gi].statuses) || [];
+      for (var gj = 0; gj < gSts.length; gj++) allP.push(gSts[gj]);
+    }
+    if (modalGrid) {
+      renderPlatformGridToModal(allP, modalGrid);
+    }
   }
 
   // 单源测试：调用后端测试指定音源，并把结果渲染到平台状态网格

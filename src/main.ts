@@ -71,7 +71,7 @@ router.post('/api/config', async (req) => {
   if (Array.isArray(body.customSources)) {
     customSources = body.customSources
       .filter((s) => s && (s.kind === 'url' || s.kind === 'file') && s.value)
-      .map((s) => ({ kind: s.kind, value: String(s.value), name: s.name || String(s.value) }));
+      .map((s) => ({ kind: s.kind, value: String(s.value), name: s.name || String(s.value), enabled: s.enabled !== false }));
   } else if (Array.isArray(body.customSourceUrls)) {
     customSources = body.customSourceUrls
       .map((u) => String(u).trim())
