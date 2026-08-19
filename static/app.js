@@ -436,6 +436,10 @@
       var resultEl = $('test-result');
       hide(resultEl);
 
+      // 立即弹出检测弹窗，显示"检测中"状态，再后台发起检测
+      resolveModalHandlers();
+      showTestModalLoading(countEnabledSources());
+
       var useBuiltin = $('cfg-mode-builtin') ? $('cfg-mode-builtin').checked : true;
       var config = {
         useBuiltinSource: useBuiltin,
@@ -469,6 +473,7 @@
         show(resultEl);
         resultEl.className = 'test-result fail';
         resultEl.innerHTML = ICON_FAIL + escapeHtml('测试失败: ' + String(e));
+        showTestModalError(String(e));
       }).finally(function () {
         btn.disabled = false;
         if (spanEl) spanEl.textContent = originalText;
@@ -929,26 +934,78 @@
     }
     modal.style.display = 'block';
   }
-  // 绑定一次弹窗关闭/日志切换事件（避免重复绑定）
+  // 绑定弹窗关闭/遮罩/诊断日志切换：统一用 document 级事件委托，永久生效，
+  // 不受弹窗内容被 innerHTML 重渲染的影响。
   var __modalHandlersBound = false;
   function resolveModalHandlers() {
     if (__modalHandlersBound) return;
     __modalHandlersBound = true;
+    document.addEventListener('click', function (ev) {
+      var modal = $('source-test-modal');
+      if (!modal || modal.style.display !== 'block') return;
+      var t = ev.target;
+      if (t && t.classList && t.classList.contains('close') && modal.contains(t)) {
+        modal.style.display = 'none';
+        return;
+      }
+      if (t === modal) {
+        modal.style.display = 'none';
+        return;
+      }
+    });
+    document.addEventListener('click', function (ev) {
+      var t = ev.target;
+      if (!t || !t.classList || !t.classList.contains('diag-toggle')) return;
+      var diagLog = $('modal-diag-log');
+      if (!diagLog) return;
+      var show = diagLog.classList.contains('hidden');
+      if (show) { diagLog.classList.remove('hidden'); t.textContent = '隐藏诊断日志'; }
+      else { diagLog.classList.add('hidden'); t.textContent = '显示诊断日志'; }
+    });
+  }
+  // 获取启用的音源数量
+  function countEnabledSources() {
+    var n = 0;
+    for (var i = 0; i < sources.length; i++) {
+      if (sources[i].enabled !== false) n++;
+    }
+    return n;
+  }
+  // 检测弹窗：加载中状态（点击测试连接后立即展示）
+  function showTestModalLoading(enabledCount) {
     var modal = $('source-test-modal');
     if (!modal) return;
-    var closeBtn = modal.querySelector('.modal-header .close');
-    if (closeBtn) closeBtn.addEventListener('click', function () { modal.style.display = 'none'; });
-    modal.addEventListener('click', function (ev) {
-      if (ev.target === modal) modal.style.display = 'none';
-    });
-    var diagToggle = $('modal-diag-toggle');
-    var diagLog = $('modal-diag-log');
-    if (diagToggle && diagLog) {
-      diagToggle.addEventListener('click', function () {
-        var show = diagLog.classList.contains('hidden');
-        if (show) { diagLog.classList.remove('hidden'); diagToggle.textContent = '隐藏诊断日志'; }
-        else { diagLog.classList.add('hidden'); diagToggle.textContent = '显示诊断日志'; }
-      });
+    var mr = $('modal-test-result');
+    if (mr) {
+      mr.className = 'test-result loading';
+      mr.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;animation:spin 1s linear infinite;flex-shrink:0"><path d="M21 12a9 9 0 11-6.22-8.56"/></svg>正在检测，请稍候...';
+    }
+    var starLine = $('modal-starline');
+    if (starLine) { starLine.className = 'star-line hidden'; starLine.innerHTML = ''; }
+    var listEl = $('modal-sources-list');
+    if (listEl) {
+      var en = (enabledCount !== undefined && enabledCount >= 0) ? enabledCount : sources.length;
+      listEl.innerHTML = '<div class="pf-empty">正在检测 ' + en + ' 个启用音源，请稍候...</div>';
+    }
+    var gridEl = $('modal-platform-grid');
+    if (gridEl) gridEl.innerHTML = '<div class="pf-empty">检测中...</div>';
+    var diagWrap = $('modal-diag-wrap');
+    if (diagWrap) diagWrap.className = 'diag-wrap hidden';
+    modal.style.display = 'block';
+  }
+  // 检测弹窗：检测出错时显示错误
+  function showTestModalError(err) {
+    var modal = $('source-test-modal');
+    if (!modal) return;
+    var mr = $('modal-test-result');
+    if (mr) {
+      mr.className = 'test-result fail';
+      mr.innerHTML = ICON_FAIL + escapeHtml('检测失败: ' + err);
+    }
+    var listEl = $('modal-sources-list');
+    if (listEl) {
+      var cur = listEl.innerHTML;
+      if (!cur || cur.indexOf('正在检测') === 0) listEl.innerHTML = '';
     }
   }
   // 渲染平台状态网格到指定容器（用于 modal）
