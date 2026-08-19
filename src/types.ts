@@ -63,6 +63,8 @@ export interface PlatformStatus {
   name: string;
   status: 'ok' | 'fail' | 'unsupported' | 'unreachable';
   reason?: string;
+  /** 取 URL 耗时（毫秒），探测期间为真实请求延迟 */
+  latencyMs?: number;
 }
 
 /** 平台中文名称 */

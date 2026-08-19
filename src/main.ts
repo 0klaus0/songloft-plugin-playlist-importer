@@ -25,7 +25,7 @@ import { fetchPlaylist } from './fetchers';
 import { testLuoxueServer } from './luoxue';
 import { importPlaylist } from './songloft-api';
 import { getLogs, clearLogs, restoreLogs, logInfo, logWarn, logError } from './logger';
-import { loadSourceContent, extractSourceMetadata, testSingleSource, SourceDescriptor } from './lx-source';
+import { loadSourceContent, extractSourceMetadata, testSingleSource, testSingleSourceDetailed, SourceDescriptor } from './lx-source';
 
 const router = createRouter();
 
@@ -329,6 +329,30 @@ router.post('/api/sources/test', async (req) => {
   const result = await testSingleSource(desc);
   logInfo(`音源测试完成: ${result.message}`);
   return jsonResponse({ success: true, ok: result.ok, message: result.message, platforms: result.statuses, sourceIndex: idx });
+});
+
+/**
+ * POST /api/sources/test-detail — 详细检测单个音源（用于检测弹窗）
+ * 返回每个平台延迟、测试歌曲、诊断日志与评分，类似洛雪音源插件的检测页面。
+ */
+router.post('/api/sources/test-detail', async (req) => {
+  const body = parseBody<{ index?: number }>(req.body);
+  const idx = body.index;
+  if (typeof idx !== 'number' || idx < 0) return errorResponse('缺少有效的音源索引');
+
+  const config = await getConfig();
+  const sources = config.customSources || [];
+  if (idx >= sources.length) return errorResponse('音源索引越界');
+
+  const s = sources[idx];
+  const desc: SourceDescriptor = {
+    name: s.name || s.value,
+    load: () => loadSourceContent(s),
+  };
+  logInfo(`开始详细检测音源: ${s.name || s.value}`);
+  const result = await testSingleSourceDetailed(desc);
+  logInfo(`音源详细检测完成: ${result.name} 评分=${result.score} 可用=${result.okCount}/${result.testedCount}`);
+  return jsonResponse({ success: true, ...result, sourceIndex: idx });
 });
 
 /** POST /api/parse — 解析分享链接 */

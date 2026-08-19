@@ -730,7 +730,7 @@
   }
 
   // 单源测试：调用后端测试指定音源，并把结果渲染到平台状态网格
-  // 单源测试：调用后端测试指定音源，并把结果渲染到 modal
+  // 单源测试：调用后端详细检测指定音源，把评分/星级/平台延迟/诊断日志渲染到 modal（类似洛雪音源插件）
   function testSingleSource(idx, btn) {
     if (!btn) return;
     var originalHtml = btn.innerHTML;
@@ -740,46 +740,107 @@
     var modal = $('source-test-modal');
     var modalResult = $('modal-test-result');
     var modalGrid = $('modal-platform-grid');
-    api('/sources/test', 'POST', { index: idx }).then(function (res) {
+    var starLine = $('modal-starline');
+    var diagWrap = $('modal-diag-wrap');
+    var diagLog = $('modal-diag-log');
+    var diagToggle = $('modal-diag-toggle');
+    resolveModalHandlers();
+    api('/sources/test-detail', 'POST', { index: idx }).then(function (res) {
       btn.disabled = false;
       btn.classList.remove('testing');
       btn.innerHTML = originalHtml;
-      if (modal && modalResult && modalGrid) {
-        // 计算得分
-        var platforms = res.platforms || [];
-        var total = platforms.length;
-        var okCount = 0;
-        for (var i = 0; i < total; i++) {
-          if (platforms[i].status === 'ok') okCount++;
-        }
-        var score = total > 0 ? Math.round((okCount / total) * 100) : 0;
-        // 更新来源对象的测试结果
-        if (sources && sources[idx]) {
-          sources[idx].testScore = score;
-          sources[idx].testStatus = res.ok ? 'ok' : 'fail';
-          sources[idx].testMessage = res.message || '';
-          // 更新源卡片UI（可选：重新渲染列表以显示得分）
-          renderSourceList();
-        }
-        var msg = '连通性检测：可用 ' + okCount + '/' + total + ' 个来源 (得分: ' + score + '%)';
-        if (res.ok) {
+      if (!res.success) { showToast('检测失败: ' + (res.error || '未知错误'), 'error'); return; }
+      if (!modal) { return; }
+      var platforms = res.statuses || res.platforms || [];
+      var okCount = res.okCount !== undefined ? res.okCount : 0;
+      var testedCount = res.testedCount !== undefined ? res.testedCount : platforms.length;
+      var score = res.score !== undefined ? res.score : 0;
+      var starScore = res.starScore !== undefined ? res.starScore : 0;
+      // 更新来源对象的测试结果
+      if (sources && sources[idx]) {
+        sources[idx].testScore = score;
+        sources[idx].testStatus = res.ok ? 'ok' : 'fail';
+        sources[idx].testMessage = res.msg || res.message || '';
+        renderSourceList();
+      }
+      var msg = '可用 ' + okCount + '/' + testedCount + ' 个音源 (评分: ' + score + ')';
+      if (modalResult) {
+        if (res.ok || okCount > 0) {
           modalResult.className = 'test-result success';
           modalResult.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>' + escapeHtml(msg);
         } else {
           modalResult.className = 'test-result fail';
           modalResult.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + escapeHtml(msg);
         }
-        // 渲染平台状态网格到 modal
-        renderPlatformGridToModal(res.platforms, modalGrid);
-        // 显示 modal
-        modal.style.display = 'block';
       }
+      // 星级评分
+      if (starLine) {
+        var starHtml = '';
+        var fullStars = Math.floor(starScore);
+        var halfStar = (starScore - fullStars) >= 0.5;
+        var emptyStars = 5 - fullStars - (halfStar ? 1 : 0);
+        for (var a = 0; a < fullStars; a++) starHtml += starSvg('');
+        if (halfStar) starHtml += starSvg('', true);
+        for (var b = 0; b < emptyStars; b++) starHtml += starSvg(' off');
+        starLine.className = 'star-line';
+        starLine.innerHTML = '<span class="sl-stars">' + starHtml + '</span><span class="sl-text">' + score + ' 分</span><span class="sl-count">' + okCount + '/' + testedCount + ' 个音源可用</span>';
+      }
+      // 平台状态网格（含延迟）
+      if (modalGrid) renderPlatformGridToModal(platforms, modalGrid);
+      // 诊断日志
+      var logs = res.logs || [];
+      if (diagWrap && diagLog && diagToggle) {
+        if (logs.length > 0) {
+          var logHtml = '';
+          for (var li = 0; li < logs.length; li++) {
+            var l = logs[li];
+            var cls = 'dl-default';
+            if (/\[error\]/.test(l)) cls = 'dl-error';
+            else if (/\[warn\]/.test(l)) cls = 'dl-warn';
+            logHtml += '<div class="' + cls + '">' + escapeHtml(l) + '</div>';
+          }
+          diagLog.innerHTML = logHtml;
+          diagWrap.className = 'diag-wrap';
+          diagToggle.textContent = '显示诊断日志 (' + logs.length + ')';
+        } else {
+          diagWrap.className = 'diag-wrap hidden';
+        }
+      }
+      if (modal) modal.style.display = 'block';
     }).catch(function (e) {
       btn.disabled = false;
       btn.classList.remove('testing');
       btn.innerHTML = originalHtml;
-      showToast('测试失败: ' + e, 'error');
+      showToast('检测失败: ' + e, 'error');
     });
+  }
+  // 生成星级 SVG
+  function starSvg(cls, half) {
+    var p = 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z';
+    var o = half ? 'style="opacity:0.5"' : '';
+    return '<svg class="' + cls + '" viewBox="0 0 24 24" ' + o + '><path d="' + p + '"/></svg>';
+  }
+  // 绑定一次弹窗关闭/日志切换事件（避免重复绑定）
+  var __modalHandlersBound = false;
+  function resolveModalHandlers() {
+    if (__modalHandlersBound) return;
+    __modalHandlersBound = true;
+    var modal = $('source-test-modal');
+    if (!modal) return;
+    var closeBtn = modal.querySelector('.modal-header .close');
+    if (closeBtn) closeBtn.addEventListener('click', function () { modal.style.display = 'none'; });
+    modal.addEventListener('click', function (ev) {
+      if (ev.target === modal) modal.style.display = 'none';
+    });
+    var diagToggle = $('modal-diag-toggle');
+    var diagLog = $('modal-diag-log');
+    if (diagToggle && diagLog) {
+      diagToggle.addEventListener('click', function () {
+        var show = diagLog.classList.contains('hidden');
+        if (show) { diagLog.classList.remove('hidden'); diagToggle.textContent = '隐藏诊断日志'; }
+        else { diagLog.classList.add('hidden'); diagToggle.textContent = '显示诊断日志'; }
+      });
+    }
   }
   // 渲染平台状态网格到指定容器（用于 modal）
   function renderPlatformGridToModal(platforms, container) {
@@ -794,11 +855,13 @@
       var status = p.status || 'unreachable';
       var statusText = PF_STATUS_TEXT[status] || status;
       var reasonText = (status === 'fail' || status === 'unreachable') && p.reason ? p.reason : '';
+      var latencyHtml = (p.latencyMs !== undefined) ? '<div class="pf-latency">' + p.latencyMs + 'ms</div>' : '';
       html += '<div class="pf-item ' + status + '" title="' + escapeHtml(reasonText || statusText) + '">';
       html += '<span class="pf-dot ' + status + '"></span>';
       html += '<div class="pf-info">';
       html += '<div class="pf-name">' + escapeHtml(p.name) + '</div>';
       html += '<div class="pf-status">' + escapeHtml(reasonText || statusText) + '</div>';
+      html += latencyHtml;
       html += '</div></div>';
     }
     container.innerHTML = html;

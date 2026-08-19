@@ -873,12 +873,56 @@ async function initEnvInner(scriptCode: string, name: string): Promise<boolean> 
  *   - 'musicUrl'（洛雪真实协议）：handler(source, quality, musicInfo, callback)
  *   - 'request'（旧协议）：handler({ source, action:'musicUrl', info:{ type, quality, musicInfo } })
  * 两种约定都兼容 handler 返回 Promise 或同步返回的情况。
+ *
+ * ★ 增强（v1.20.0）：在取 URL 前先用脚本硬编码的后端地址做一次 fetch 连通性自检，
+ *   并记录请求延迟、加入超时兜底与诊断日志，帮助定位「同一音源在洛雪可用、本插件全部失败」的根因。
+ *
+ * @param backendUrls 脚本硬编码的后端 URL 列表（用于在请求代码内直接测试子环境 fetch 连通性）
  */
-function buildRequestCode(source: string, songId: string, quality: string): string {
+function buildRequestCode(source: string, songId: string, quality: string, backendUrls?: string[]): string {
+  const urlsJson = JSON.stringify(backendUrls && backendUrls.length > 0 ? backendUrls : []);
   return `
 (function() {
+  var __start = Date.now();
+  var __settled = false;
+  var __timer = null;
+  function __settle() { if (__settled) return; __settled = true; if (__timer) { clearTimeout(__timer); __timer = null; } }
+
+  // ===== 直接测试子环境 fetch 连通性（帮助定位「全部失败」根因）=====
+  var __backendUrls = ${urlsJson};
+  if (__backendUrls.length > 0) {
+    var __testUrl = __backendUrls[0];
+    if (typeof fetch === 'function') {
+      if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ level: 'info', msg: '[检测] 直接测试子环境 fetch: ' + __testUrl }));
+      var __testDone = false;
+      var __testTimer = setTimeout(function() {
+        if (!__testDone) { __testDone = true; if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ level: 'error', msg: '[检测] fetch 连通性测试超时（5秒）: ' + __testUrl })); }
+      }, 5000);
+      try {
+        fetch(__testUrl, { method: 'GET', headers: { 'accept': 'application/json' } }).then(function(r) {
+          if (__testDone) return; __testDone = true; clearTimeout(__testTimer);
+          var __keys = []; try { for (var k in r) __keys.push(k); } catch (e) {}
+          if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ level: 'info', msg: '[检测] fetch 连通性 OK: status=' + r.status + ' text=' + (typeof r.text === 'function') + ' json=' + (typeof r.json === 'function') + ' bodyProp=' + (r.body !== undefined && r.body !== null) + ' keys=[' + __keys.slice(0, 15).join(',') + ']' }));
+        }).catch(function(e) {
+          if (__testDone) return; __testDone = true; clearTimeout(__testTimer);
+          if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ level: 'error', msg: '[检测] fetch 连通性失败: ' + String(e).substring(0, 200) }));
+        });
+      } catch (e) {
+        if (__testDone) return; __testDone = true; clearTimeout(__testTimer);
+        if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ level: 'error', msg: '[检测] fetch 调用异常: ' + String(e).substring(0, 200) }));
+      }
+    } else {
+      if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ level: 'error', msg: '[检测] 当前环境没有 fetch 全局函数' }));
+    }
+  }
+
   var handler = globalThis.__lx_request_handler;
-  if (!handler) { __go_send('musicUrl_error', JSON.stringify({ error: 'no request handler registered (脚本未注册 musicUrl/request 处理器)' })); return; }
+  if (!handler) {
+    __go_send('musicUrl_error', JSON.stringify({ error: 'no request handler registered (脚本未注册 musicUrl/request 处理器)', latencyMs: Date.now() - __start }));
+    return;
+  }
+  var evt = globalThis.__lx_request_event || 'unknown';
+  if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ level: 'info', msg: '[检测] 协议=' + evt + ' source=' + ${JSON.stringify(source)} + ' quality=' + ${JSON.stringify(quality)} + ' songId=' + ${JSON.stringify(songId)} }));
 
   // 洛雪真实 musicInfo 结构：各平台 ID 字段均带上，脚本自取所需字段
   var musicInfo = {
@@ -890,16 +934,35 @@ function buildRequestCode(source: string, songId: string, quality: string): stri
     musicId: ${JSON.stringify(songId)},
     rid: ${JSON.stringify(songId)},
     copyrightId: ${JSON.stringify(songId)},
-    albumId: ${JSON.stringify(songId)}
+    albumId: ${JSON.stringify(songId)},
+    name: '晴天',
+    singer: '周杰伦',
+    albumName: ''
   };
 
   function emitResult(url) {
+    if (typeof __go_send !== 'function') return;
+    __settle();
     if (url && typeof url === 'string' && String(url).startsWith('http')) {
-      __go_send('musicUrl_result', JSON.stringify({ url: String(url).trim() }));
+      __go_send('musicUrl_result', JSON.stringify({ url: String(url).trim(), latencyMs: Date.now() - __start }));
     } else {
-      __go_send('musicUrl_error', JSON.stringify({ error: '脚本未返回有效 URL', url: url == null ? 'null' : String(url).substring(0, 200) }));
+      __go_send('musicUrl_error', JSON.stringify({ error: '脚本未返回有效 URL', url: url == null ? 'null' : String(url).substring(0, 200), latencyMs: Date.now() - __start }));
     }
   }
+  function emitError(msg) {
+    if (typeof __go_send !== 'function') return;
+    __settle();
+    __go_send('musicUrl_error', JSON.stringify({ message: msg, latencyMs: Date.now() - __start }));
+  }
+
+  // 超时兜底：若 handler 的 Promise 在 12 秒内未 resolve/reject（如 fetch 挂起），
+  // 主动发出错误事件，避免 executeWait 静默超时导致「全部失败」且无诊断信息。
+  __timer = setTimeout(function() {
+    if (!__settled) {
+      __settled = true;
+      if (typeof __go_send === 'function') __go_send('musicUrl_error', JSON.stringify({ message: '脚本 handler 超时（12秒内未返回 URL），可能 fetch 挂起或后端不可达', latencyMs: Date.now() - __start }));
+    }
+  }, 12000);
 
   // ★ 关键修复：真实洛雪（lx-music）musicUrl 回调约定是 callback(err, data)
   //   第一个参数为错误对象（成功时为 null/undefined），第二个参数才是结果。
@@ -911,32 +974,31 @@ function buildRequestCode(source: string, songId: string, quality: string): stri
       // 单参退化形式：把唯一参数当作 data（仅当它是结果对象或字符串时）
       if (typeof errArg === 'string') { result = errArg; }
       else if (typeof errArg === 'object' && errArg !== null && !(errArg instanceof Error)) { result = errArg; }
-      else { __go_send('musicUrl_error', JSON.stringify({ error: '脚本回调参数为空' })); return; }
+      else { emitError('脚本回调参数为空'); return; }
     } else {
       if (errArg) {
         var em = (errArg && errArg.message) ? errArg.message : String(errArg);
-        __go_send('musicUrl_error', JSON.stringify({ error: '脚本回调报错: ' + em }));
+        emitError('脚本回调报错: ' + em);
         return;
       }
       result = dataArg;
     }
-    if (result == null) { __go_send('musicUrl_error', JSON.stringify({ error: '脚本回调返回 null' })); return; }
+    if (result == null) { emitError('脚本回调返回 null'); return; }
     if (typeof result === 'string') return emitResult(result);
     if (typeof result === 'object') {
       var u = result.url || result.data || result.link || (result.body && result.body.url) || null;
       return emitResult(u);
     }
-    __go_send('musicUrl_error', JSON.stringify({ error: '脚本回调返回未知类型' }));
+    emitError('脚本回调返回未知类型');
   }
 
   try {
-    var evt = globalThis.__lx_request_event;
     if (evt === 'musicUrl') {
       // 洛雪真实协议：handler(source, quality, musicInfo, callback)
       var ret = handler(${JSON.stringify(source)}, ${JSON.stringify(quality)}, musicInfo, cb);
       if (ret && typeof ret.then === 'function') {
         ret.then(cb).catch(function(err) {
-          __go_send('musicUrl_error', JSON.stringify({ message: err && err.message ? err.message : String(err) }));
+          emitError(err && err.message ? err.message : String(err));
         });
       }
     } else {
@@ -948,15 +1010,22 @@ function buildRequestCode(source: string, songId: string, quality: string): stri
       };
       var ret2 = handler(reqObj);
       if (ret2 && typeof ret2.then === 'function') {
-        ret2.then(function(u) { emitResult(u); }).catch(function(err) {
-          __go_send('musicUrl_error', JSON.stringify({ message: err && err.message ? err.message : String(err) }));
+        ret2.then(function(u) {
+          if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ level: 'info', msg: '[检测] 旧协议 Promise resolve: ' + (typeof u === 'string' ? u.substring(0, 120) : JSON.stringify(u).substring(0, 120)) }));
+          emitResult(u);
+        }).catch(function(err) {
+          if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ level: 'error', msg: '[检测] 旧协议 Promise reject: ' + (err && err.message ? err.message : String(err)) }));
+          emitError(err && err.message ? err.message : String(err));
         });
       } else if (typeof ret2 === 'string') {
         emitResult(ret2);
+      } else {
+        if (typeof __go_send === 'function') __go_send('console_log', JSON.stringify({ level: 'warn', msg: '[检测] 旧协议 handler 未返回 Promise/字符串, ret2=' + (ret2 === undefined ? 'undefined' : typeof ret2) }));
+        emitError('脚本 handler 未返回 Promise/字符串（可能未匹配 action=musicUrl）');
       }
     }
   } catch (e) {
-    __go_send('musicUrl_error', JSON.stringify({ message: e && e.message ? e.message : String(e), stack: e && e.stack ? String(e.stack).substring(0, 500) : '' }));
+    emitError((e && e.message ? e.message : String(e)) + (e && e.stack ? ' | ' + String(e.stack).substring(0, 300) : ''));
   }
 })();
 `;
@@ -1117,6 +1186,81 @@ const PROBE_SONG_IDS: Record<string, string> = {
   mg: '60054700000',     // 咪咕 - 周杰伦 晴天
 };
 
+/** 测试歌曲名（用于检测弹窗展示“正在用哪首歌探测”） */
+const PROBE_SONG_NAMES: Record<string, string> = {
+  kw: '晴天 - 周杰伦',
+  kg: '晴天 - 周杰伦',
+  tx: '晴天 - 周杰伦',
+  wy: '晴天 - 周杰伦',
+  mg: '晴天 - 周杰伦',
+};
+
+/** 单个平台详细探测结果（用于检测弹窗展示延迟、诊断日志） */
+export interface PlatformProbeDetail extends PlatformStatus {
+  songName?: string;
+  url?: string;
+  logs?: string[];
+}
+
+/** 音源详细检测结果（用于检测弹窗展示，类似洛雪音源插件） */
+export interface SourceTestDetail {
+  name: string;
+  ok: boolean;
+  /** 0-100 分 */
+  score: number;
+  /** 0-5 星（1 位小数） */
+  starScore: number;
+  okCount: number;
+  testedCount: number;
+  totalCount: number;
+  statuses: PlatformProbeDetail[];
+  logs: string[];
+  initError?: string;
+}
+
+/**
+ * 真实探测单个平台：发起一次取 URL 请求，返回 URL / 延迟 / 错误 / 诊断日志。
+ * 供检测逻辑与检测弹窗复用；对线上解析链（requestMusicUrl）无影响。
+ */
+async function probePlatform(source: string, songId: string, quality: string, backendUrls?: string[]): Promise<{ url: string | null; latencyMs?: number; error?: string; logs: string[] }> {
+  if (!envReady) { return { url: null, error: '音源环境未初始化', logs: [] }; }
+  const requestCode = buildRequestCode(source, songId, quality, backendUrls);
+  const logs: string[] = [];
+  try {
+    // 探测用较短超时（15s），避免某平台卡住导致整个检测长时间无响应
+    const result = await songloft.jsenv.executeWait(ENV_NAME, requestCode, 15000, ['musicUrl_result', 'musicUrl_error']);
+    if (result.error) { envReady = false; return { url: null, error: `执行错误: ${result.error}`, logs }; }
+    const consoleLogs = result.events.filter((e) => e.name === 'console_log');
+    for (const cl of consoleLogs) {
+      try {
+        const clData = JSON.parse(cl.data);
+        logs.push(`[${clData.level}] ${clData.msg}`);
+      } catch { /* ignore */ }
+    }
+    const successEvent = result.events.find((e) => e.name === 'musicUrl_result');
+    if (successEvent) {
+      try {
+        const data = JSON.parse(successEvent.data);
+        if (data.url && data.url.startsWith('http')) return { url: data.url, latencyMs: data.latencyMs, logs };
+        return { url: null, error: `URL 无效: ${data.url}`, latencyMs: data.latencyMs, logs };
+      } catch (e) { return { url: null, error: `结果解析失败: ${String(e)}`, logs }; }
+    }
+    const errorEvent = result.events.find((e) => e.name === 'musicUrl_error');
+    if (errorEvent) {
+      try {
+        const data = JSON.parse(errorEvent.data);
+        const errMsg = data.message || data.error || 'unknown';
+        const errStack = data.stack ? ` | stack: ${data.stack.substring(0, 200)}` : '';
+        return { url: null, error: `${errMsg}${errStack}`, latencyMs: data.latencyMs, logs };
+      } catch (e) { return { url: null, error: `错误解析失败: ${String(e)}`, logs }; }
+    }
+    return { url: null, error: '请求超时（15秒内未收到脚本响应）', logs };
+  } catch (e) {
+    envReady = false;
+    return { url: null, error: `请求异常: ${String(e)}`, logs };
+  }
+}
+
 /**
  * 测试单个音源脚本：加载、初始化，并逐平台探测可用性（像洛雪音源插件一样逐源检测）
  *
@@ -1128,7 +1272,7 @@ const PROBE_SONG_IDS: Record<string, string> = {
  */
 export async function testSingleSource(desc: SourceDescriptor): Promise<{ statuses: PlatformStatus[]; message: string; ok: boolean; score: number; total: number; okCount: number }> {
   const statuses: PlatformStatus[] = ALL_LX_SOURCES.map((s) => ({ source: s, name: LX_SOURCE_NAMES[s], status: 'unreachable' as const }));
-  const set = (src: LXSource, status: PlatformStatus['status'], reason?: string) => { const r = statuses.find((x) => x.source === src); if (r) { r.status = status; r.reason = reason; } };
+  const set = (src: LXSource, status: PlatformStatus['status'], reason?: string, latencyMs?: number) => { const r = statuses.find((x) => x.source === src); if (r) { r.status = status; if (reason) r.reason = reason; if (latencyMs !== undefined) r.latencyMs = latencyMs; } };
 
   const code = await desc.load();
   if (!code) {
@@ -1145,23 +1289,22 @@ export async function testSingleSource(desc: SourceDescriptor): Promise<{ status
   const supported = supportedSources.length > 0 ? supportedSources : ALL_LX_SOURCES;
   let okCount = 0;
   let testedCount = 0;
+  const backendUrls = extractBackendUrls(code);
   for (const src of ALL_LX_SOURCES) {
     if (!supported.includes(src)) { set(src, 'unsupported', '脚本未启用该来源'); continue; }
     testedCount++;
     const probeId = PROBE_SONG_IDS[src];
     if (!probeId) { set(src, 'fail', '无测试歌曲ID'); continue; }
     try {
-      const url = await requestMusicUrl(src, probeId, '128k');
-      if (url) { set(src, 'ok'); okCount++; }
+      const probe = await probePlatform(src, probeId, '128k', backendUrls);
+      if (probe.url) { set(src, 'ok', undefined, probe.latencyMs); okCount++; }
       else {
-        const lastErr = (requestMusicUrl as unknown as { lastError?: string }).lastError || '';
-        const backendUrls = extractBackendUrls(code);
-        const reason = lastErr
-          ? `取URL失败: ${lastErr.substring(0, 100)}`
+        const reason = probe.error
+          ? `取URL失败: ${probe.error.substring(0, 100)}`
           : backendUrls.length > 0
             ? `取URL失败（后端可能不可用: ${backendUrls.join(', ')}）`
             : '取URL失败（后端可能不可用）';
-        set(src, 'fail', reason);
+        set(src, 'fail', reason, probe.latencyMs);
       }
     } catch (e) { set(src, 'fail', `探测异常: ${String(e).slice(0, 60)}`); }
   }
@@ -1170,6 +1313,73 @@ export async function testSingleSource(desc: SourceDescriptor): Promise<{ status
     ? `连通性检测：可用 ${okCount}/${testedCount} 个来源 (得分: ${score}%)`
     : '所有来源取URL失败（音源后端可能不可用，请检查脚本硬编码的 API 地址）';
   return { statuses, message: msg, ok: okCount > 0, score, total: testedCount, okCount };
+}
+
+/**
+ * 详细检测单个音源（用于检测弹窗展示延迟、诊断日志、评分）
+ * 与 testSingleSource 的区别：每个平台额外返回延迟、测试歌曲名、诊断日志。
+ */
+export async function testSingleSourceDetailed(desc: SourceDescriptor): Promise<SourceTestDetail> {
+  const statuses: PlatformProbeDetail[] = ALL_LX_SOURCES.map((s) => ({
+    source: s,
+    name: LX_SOURCE_NAMES[s],
+    status: 'unreachable' as const,
+    songName: PROBE_SONG_NAMES[s] || '',
+  }));
+  const set = (src: LXSource, status: PlatformProbeDetail['status'], reason?: string, latencyMs?: number) => {
+    const r = statuses.find((x) => x.source === src);
+    if (r) { r.status = status; if (reason) r.reason = reason; if (latencyMs !== undefined) r.latencyMs = latencyMs; }
+  };
+
+  const code = await desc.load();
+  if (!code) {
+    for (const r of statuses) { r.status = 'unreachable'; r.reason = '脚本加载失败'; }
+    return { name: desc.name, ok: false, score: 0, starScore: 0, okCount: 0, testedCount: 0, totalCount: ALL_LX_SOURCES.length, statuses, logs: [], initError: '脚本加载失败' };
+  }
+  scriptCache.set(desc.name, code);
+  const ok = await initEnv(code, desc.name);
+  if (!ok) {
+    const err = lastInitError || '未知错误';
+    for (const r of statuses) { r.status = 'unreachable'; r.reason = '脚本初始化失败'; }
+    return { name: desc.name, ok: false, score: 0, starScore: 0, okCount: 0, testedCount: 0, totalCount: ALL_LX_SOURCES.length, statuses, logs: [], initError: err };
+  }
+  const supported = supportedSources.length > 0 ? supportedSources : ALL_LX_SOURCES;
+  let okCount = 0;
+  let testedCount = 0;
+  const logs: string[] = [];
+  const backendUrls = extractBackendUrls(code);
+  for (const src of ALL_LX_SOURCES) {
+    if (!supported.includes(src)) { set(src, 'unsupported', '脚本未启用该来源'); continue; }
+    testedCount++;
+    const probeId = PROBE_SONG_IDS[src];
+    if (!probeId) { set(src, 'fail', '无测试歌曲ID'); continue; }
+    try {
+      const probe = await probePlatform(src, probeId, '128k', backendUrls);
+      if (probe.url) { set(src, 'ok', undefined, probe.latencyMs); okCount++; }
+      else {
+        const reason = probe.error
+          ? `取URL失败: ${probe.error.substring(0, 120)}`
+          : backendUrls.length > 0
+            ? `取URL失败（后端可能不可用: ${backendUrls.join(', ')}）`
+            : '取URL失败（后端可能不可用）';
+        set(src, 'fail', reason, probe.latencyMs);
+      }
+      if (probe.logs && probe.logs.length > 0) logs.push(...probe.logs.map((l) => `[${src}] ${l}`));
+    } catch (e) { set(src, 'fail', `探测异常: ${String(e).slice(0, 60)}`); }
+  }
+  const score = testedCount > 0 ? Math.round((okCount / testedCount) * 100) : 0;
+  const starScore = testedCount > 0 ? Math.round((okCount / testedCount) * 50) / 10 : 0;
+  return {
+    name: desc.name,
+    ok: okCount > 0,
+    score,
+    starScore,
+    okCount,
+    testedCount,
+    totalCount: ALL_LX_SOURCES.length,
+    statuses,
+    logs: logs.slice(0, 60),
+  };
 }
 export async function probePlatforms(sources: SourceDescriptor[]): Promise<PlatformStatus[]> {
   const valid = sources.filter((s) => s && s.name);
