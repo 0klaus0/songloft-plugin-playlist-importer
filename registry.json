@@ -1,0 +1,6 @@
+{
+  "name": "0klaus0 Songloft 插件源",
+  "plugins": [
+    "https://raw.githubusercontent.com/0klaus0/songloft-plugin-playlist-importer/main/plugin.json"
+  ]
+}
