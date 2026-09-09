@@ -1636,6 +1636,30 @@ body {
           </select>
         </div>
 
+        <div class="form-group">
+          <label class="label" for="cfg-download-dir">保存子目录</label>
+          <input type="text" id="cfg-download-dir" class="input" value="downloads" placeholder="downloads">
+          <p class="hint">相对于 Songloft 音乐目录；留空表示音乐目录根路径，不支持绝对路径或 ..</p>
+        </div>
+
+        <div class="form-group">
+          <label class="label" for="cfg-path-template">目录结构</label>
+          <select id="cfg-path-template" class="select">
+            <option value="{artist}/{album}/{title}">艺术家 / 专辑 / 歌曲（推荐）</option>
+            <option value="{artist}/{title}">艺术家 / 歌曲</option>
+            <option value="{album}/{title}">专辑 / 歌曲</option>
+            <option value="{title}">歌曲（不创建分类目录）</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+            <input type="checkbox" id="cfg-reuse-local" checked style="width:17px;height:17px">
+            <span class="label" style="margin:0">下载前复用曲库中已有的本地歌曲</span>
+          </label>
+          <p class="hint">严格匹配标题、艺术家及歌曲版本；匹配成功时直接加入歌单，不重复下载</p>
+        </div>
+
         <button id="btn-save-options" class="btn btn-primary btn-block" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>
           <span>保存选项</span>
@@ -1797,6 +1821,9 @@ body {
       if ($('cfg-external-source')) $('cfg-external-source').value = c.defaultSearchSource || 'kw';
       if ($('cfg-mode')) $('cfg-mode').value = c.importMode || 'stream';
       if ($('cfg-quality')) $('cfg-quality').value = c.defaultQuality || '320k';
+      if ($('cfg-download-dir')) $('cfg-download-dir').value = c.downloadDirectory == null ? 'downloads' : c.downloadDirectory;
+      if ($('cfg-path-template')) $('cfg-path-template').value = c.downloadPathTemplate || '{artist}/{album}/{title}';
+      if ($('cfg-reuse-local')) $('cfg-reuse-local').checked = c.reuseLocalSongs !== false;
     }).catch(function (e) { console.error('加载配置失败:', e); });
   }
 
@@ -2137,6 +2164,9 @@ body {
     $('btn-save-options').addEventListener('click', function () {
       var config = {
         importMode: $('cfg-mode') ? $('cfg-mode').value : 'stream',
+        downloadDirectory: $('cfg-download-dir') ? $('cfg-download-dir').value.trim() : 'downloads',
+        downloadPathTemplate: $('cfg-path-template') ? $('cfg-path-template').value : '{artist}/{album}/{title}',
+        reuseLocalSongs: $('cfg-reuse-local') ? $('cfg-reuse-local').checked : true,
       };
       api('/config', 'POST', config).then(function (res) {
         if (res.success) {

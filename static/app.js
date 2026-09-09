@@ -111,6 +111,9 @@
       if ($('cfg-external-source')) $('cfg-external-source').value = c.defaultSearchSource || 'kw';
       if ($('cfg-mode')) $('cfg-mode').value = c.importMode || 'stream';
       if ($('cfg-quality')) $('cfg-quality').value = c.defaultQuality || '320k';
+      if ($('cfg-download-dir')) $('cfg-download-dir').value = c.downloadDirectory == null ? 'downloads' : c.downloadDirectory;
+      if ($('cfg-path-template')) $('cfg-path-template').value = c.downloadPathTemplate || '{artist}/{album}/{title}';
+      if ($('cfg-reuse-local')) $('cfg-reuse-local').checked = c.reuseLocalSongs !== false;
     }).catch(function (e) { console.error('加载配置失败:', e); });
   }
 
@@ -412,6 +415,9 @@
     $('btn-save-options').addEventListener('click', function () {
       var config = {
         importMode: $('cfg-mode') ? $('cfg-mode').value : 'stream',
+        downloadDirectory: $('cfg-download-dir') ? $('cfg-download-dir').value.trim() : 'downloads',
+        downloadPathTemplate: $('cfg-path-template') ? $('cfg-path-template').value : '{artist}/{album}/{title}',
+        reuseLocalSongs: $('cfg-reuse-local') ? $('cfg-reuse-local').checked : true,
       };
       api('/config', 'POST', config).then(function (res) {
         if (res.success) {

@@ -44,6 +44,9 @@ export interface SourceDescriptor {
 /** 当前音源支持的来源列表 */
 let supportedSources: string[] = [];
 
+/** 当前脚本按来源声明的音质名称，用于兼容 24bit/flac24bit/hires 等别名 */
+let supportedQualities: Record<string, string[]> = {};
+
 /** 是否已初始化环境 */
 let envReady = false;
 
@@ -847,11 +850,23 @@ async function initEnvInner(scriptCode: string, name: string): Promise<boolean> 
     try {
       const initedData = JSON.parse(initedEvent.data);
       if (initedData.status === false) { logError('音源脚本初始化失败: status=false'); lastInitError = '脚本初始化失败 (status=false)'; return false; }
-      if (initedData.sources) { supportedSources = Object.keys(initedData.sources); logInfo(`音源脚本已初始化，支持来源: ${supportedSources.join(', ')}`); }
-      else { supportedSources = ['kw', 'kg', 'tx', 'wy', 'mg']; logInfo('音源脚本已初始化（未声明来源，默认全部支持）'); }
+      if (initedData.sources) {
+        supportedSources = Object.keys(initedData.sources);
+        supportedQualities = {};
+        for (const source of supportedSources) {
+          const qualities = initedData.sources[source]?.qualitys;
+          if (Array.isArray(qualities)) supportedQualities[source] = qualities.map((q: unknown) => String(q).toLowerCase());
+        }
+        logInfo(`音源脚本已初始化，支持来源: ${supportedSources.join(', ')}`);
+      } else {
+        supportedSources = ['kw', 'kg', 'tx', 'wy', 'mg'];
+        supportedQualities = {};
+        logInfo('音源脚本已初始化（未声明来源，默认全部支持）');
+      }
       lastInitError = '';
     } catch {
       supportedSources = ['kw', 'kg', 'tx', 'wy', 'mg'];
+      supportedQualities = {};
       logInfo('音源脚本已初始化（来源解析失败，默认全部支持）');
       lastInitError = '';
     }
@@ -1036,9 +1051,24 @@ function buildRequestCode(source: string, songId: string, quality: string, backe
  */
 async function requestMusicUrl(source: string, songId: string, quality: string): Promise<string | null> {
   if (!envReady) { logWarn('音源环境未初始化'); return null; }
-  const requestCode = buildRequestCode(source, songId, quality);
+  const requestedQuality = String(quality || '128k').toLowerCase();
+  const declared = supportedQualities[source] || [];
+  let sourceQuality = requestedQuality;
+  if (declared.length > 0 && !declared.includes(requestedQuality)) {
+    const aliases: Record<string, string[]> = {
+      flac24bit: ['24bit', 'hires', 'flac'],
+      hires: ['24bit', 'flac24bit', 'flac'],
+      '24bit': ['flac24bit', 'hires', 'flac'],
+      lossless: ['flac', '24bit', 'flac24bit'],
+    };
+    sourceQuality = (aliases[requestedQuality] || []).find((q) => declared.includes(q)) || requestedQuality;
+  }
+  if (sourceQuality !== requestedQuality) {
+    logInfo(`音质名称适配: ${requestedQuality} → ${sourceQuality}（${source} 声明: ${declared.join(',')}）`);
+  }
+  const requestCode = buildRequestCode(source, songId, sourceQuality);
   try {
-    logInfo(`发送音源请求: ${source}/${songId} (音质=${quality})`);
+    logInfo(`发送音源请求: ${source}/${songId} (请求=${requestedQuality}, 音源参数=${sourceQuality})`);
     const result = await songloft.jsenv.executeWait(ENV_NAME, requestCode, 30000, ['musicUrl_result', 'musicUrl_error']);
     if (result.error) { logWarn(`音源请求执行错误: ${result.error}`); envReady = false; return null; }
     const consoleLogs = result.events.filter((e) => e.name === 'console_log');
@@ -1127,7 +1157,7 @@ export function isCustomSourceReady(): boolean { return envReady; }
 export async function cleanup(): Promise<void> {
   if (envReady) {
     try { await songloft.jsenv.destroy(ENV_NAME); } catch { /* ignore */ }
-    envReady = false; loadedScriptName = null; supportedSources = [];
+    envReady = false; loadedScriptName = null; supportedSources = []; supportedQualities = {};
   }
 }
 

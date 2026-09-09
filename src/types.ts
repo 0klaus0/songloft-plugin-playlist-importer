@@ -115,6 +115,12 @@ export interface PluginConfig {
   defaultQuality: Quality;
   /** 导入模式：download=下载到本地, stream=串流导入 */
   importMode: ImportMode;
+  /** 下载文件保存到 music_path 下的子目录；留空表示音乐库根目录 */
+  downloadDirectory: string;
+  /** Songloft 下载路径模板（相对于 downloadDirectory） */
+  downloadPathTemplate: string;
+  /** 下载前严格匹配并复用曲库中已有的本地歌曲 */
+  reuseLocalSongs: boolean;
   /** 默认搜索来源（跨平台搜索时使用） */
   defaultSearchSource: LXSource;
   /** 是否使用 Songloft 内置音源（true 时不需要外部洛雪 API） */
@@ -131,6 +137,9 @@ export const DEFAULT_CONFIG: PluginConfig = {
   luoxueApiPass: '',
   defaultQuality: '320k',
   importMode: 'stream',
+  downloadDirectory: 'downloads',
+  downloadPathTemplate: '{artist}/{album}/{title}',
+  reuseLocalSongs: true,
   defaultSearchSource: 'kw',
   useBuiltinSource: true,
   customSourceUrls: [],

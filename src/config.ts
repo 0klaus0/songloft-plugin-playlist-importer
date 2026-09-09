@@ -53,6 +53,20 @@ export async function saveConfig(config: PluginConfig): Promise<void> {
 export function validateConfig(config: PluginConfig): string[] {
   const errors: string[] = [];
 
+  const downloadDir = (config.downloadDirectory || '').trim().replace(/\\/g, '/');
+  const pathTemplate = (config.downloadPathTemplate || '').trim().replace(/\\/g, '/');
+  const fullTemplate = [downloadDir, pathTemplate].filter(Boolean).join('/');
+  if (!pathTemplate) errors.push('下载目录结构不能为空');
+  if (!fullTemplate.includes('{title}')) errors.push('下载目录结构必须包含 {title}');
+  if (fullTemplate.includes('..')) errors.push('下载路径不允许包含 ..');
+  if (fullTemplate.includes('//')) errors.push('下载路径不允许包含连续的 /');
+  if (/^(?:\/|[a-z]:\/)/i.test(fullTemplate)) errors.push('下载路径必须是音乐库内的相对路径');
+  const placeholders = fullTemplate.match(/\{[^}]+\}/g) || [];
+  const allowedPlaceholders = ['{title}', '{artist}', '{album}', '{year}', '{genre}'];
+  for (const placeholder of placeholders) {
+    if (!allowedPlaceholders.includes(placeholder)) errors.push(`下载路径包含不支持的占位符 ${placeholder}`);
+  }
+
   // 验证自定义音源（URL 或上传文件）
   const sources = Array.isArray(config.customSources) ? config.customSources : [];
   for (let i = 0; i < sources.length; i++) {

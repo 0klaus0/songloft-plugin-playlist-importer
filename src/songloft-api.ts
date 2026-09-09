@@ -59,18 +59,29 @@ async function getPlaylistSongs(playlistId: number): Promise<Song[]> {
   }
 }
 
-/**
- * 判断歌曲是否已在歌单中（按标题+艺术家匹配）
- */
-function isSongInPlaylist(track: TrackInfo, songs: Song[]): boolean {
-  const tTitle = track.title.toLowerCase();
-  const tArtist = track.artist.toLowerCase();
-  for (const s of songs) {
-    const title = (s.title || '').toLowerCase();
-    const artist = (s.artist || '').toLowerCase();
-    const titleMatch = title === tTitle || title.includes(tTitle) || tTitle.includes(title);
-    const artistMatch = artist === '' || artist.includes(tArtist) || tArtist.includes(artist) || track.artist === '未知艺术家';
-    if (titleMatch && artistMatch) return true;
+function normalizeMatchText(value: string): string {
+  let normalized = (value || '').trim().toLowerCase();
+  try { normalized = normalized.normalize('NFKC'); } catch { /* QuickJS 兼容 */ }
+  return normalized.replace(/[·・•]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** 保守匹配同一版本：标题和艺术家必须相同，时长或专辑用于排除同名不同版本。 */
+function isSameTrack(track: TrackInfo, song: Song): boolean {
+  if (normalizeMatchText(track.title) !== normalizeMatchText(song.title || '')) return false;
+  if (normalizeMatchText(track.artist) !== normalizeMatchText(song.artist || '')) return false;
+  if (track.duration > 0 && song.duration > 0) return Math.abs(track.duration - song.duration) <= 3;
+  if (track.album && song.album) return normalizeMatchText(track.album) === normalizeMatchText(song.album);
+  return true;
+}
+
+function isReusableLocalSong(song: Song): boolean {
+  return song.type === 'local' && !!song.file_path;
+}
+
+function isSongInPlaylist(track: TrackInfo, songs: Song[], requireLocal = false): boolean {
+  for (const song of songs) {
+    if (requireLocal && !isReusableLocalSong(song)) continue;
+    if (isSameTrack(track, song)) return true;
   }
   return false;
 }
@@ -92,33 +103,37 @@ async function addSongsToPlaylist(
 /**
  * 在曲库中搜索已有歌曲
  */
-async function findExistingSong(track: TrackInfo): Promise<number | null> {
+async function findExistingSong(track: TrackInfo, requireLocal = false): Promise<number | null> {
   try {
     const keyword = `${track.title} ${track.artist}`.trim();
     const songs = await songloft.songs.search(keyword);
 
     for (const song of songs) {
-      const title = (song.title || '').toLowerCase();
-      const artist = (song.artist || '').toLowerCase();
-      const trackTitle = track.title.toLowerCase();
-      const trackArtist = track.artist.toLowerCase();
-
-      const titleMatch = title === trackTitle ||
-        title.includes(trackTitle) ||
-        trackTitle.includes(title);
-      const artistMatch = artist === '' ||
-        artist.includes(trackArtist) ||
-        trackArtist.includes(artist) ||
-        track.artist === '未知艺术家';
-
-      if (titleMatch && artistMatch) {
-        return song.id;
-      }
+      if (requireLocal && !isReusableLocalSong(song)) continue;
+      if (isSameTrack(track, song)) return song.id;
     }
   } catch (e) {
     logWarn('搜索曲库失败: ' + String(e));
   }
   return null;
+}
+
+function buildDownloadPathTemplate(config: PluginConfig): string {
+  const directory = (config.downloadDirectory || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  const template = (config.downloadPathTemplate || '{artist}/{album}/{title}')
+    .trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  return directory ? `${directory}/${template}` : template;
+}
+
+async function downloadSong(songId: number, config: PluginConfig): Promise<SongDownloadResult> {
+  const wantsFlac = /(?:flac|lossless|hires|24bit)/i.test(config.defaultQuality);
+  return songloft.songs.download(songId, {
+    path_template: buildDownloadPathTemplate(config),
+    embed_metadata: true,
+    // 明确要求宿主以 FLAC 容器落盘，避免中转 URL 的 type=mp3 误导缓存后缀。
+    // 音源侧仍先请求 lossless；这里是文件容器与扩展名的最终兜底。
+    ...(wantsFlac ? { format: 'flac' } : {}),
+  });
 }
 
 /**
@@ -148,6 +163,51 @@ async function createRemoteSong(
     logWarn(`创建远程歌曲失败: ${track.title} - ${String(e)}`);
   }
   return null;
+}
+
+/**
+ * 下载模式兼容：部分洛雪音源返回带 `type=mp3` 的中转 URL，但在无损音质下
+ * 实际会重定向到 FLAC。Songloft 当前可能按中转/缓存路径的后缀保存文件，导致
+ * FLAC 内容被命名为 .mp3。
+ *
+ * 这里只发送 HEAD 并跟随重定向，不读取音频正文；成功时把最终音频 URL 交给
+ * Songloft。任何探测失败都回退原 URL，不能因为兼容逻辑阻断正常下载。
+ */
+async function prepareUrlForDownload(url: string, quality: string): Promise<string> {
+  const wantsLossless = /(?:flac|lossless|hires|24bit)/i.test(quality);
+  if (!wantsLossless || !/^https?:\/\//i.test(url)) return url;
+
+  try {
+    const response = await fetch(url, {
+      method: 'HEAD',
+      headers: { 'X-Fetch-Timeout-Ms': '8000' },
+    });
+    if (response.status < 200 || response.status >= 400) {
+      logInfo(`音源不支持 HEAD 探测 (HTTP ${response.status})，将由下载格式参数兜底`);
+      return url;
+    }
+
+    const responseWithUrl = response as typeof response & { url?: string };
+    const finalUrl = responseWithUrl.url || url;
+    const contentType = response.headers?.get?.('content-type') || '';
+    const isFlac = /(?:audio\/flac|audio\/x-flac|application\/flac)/i.test(contentType) ||
+      /\.flac(?:[?#]|$)/i.test(finalUrl);
+
+    if (isFlac && finalUrl !== url && /^https?:\/\//i.test(finalUrl)) {
+      logInfo(`无损格式确认：FLAC，使用重定向后的实际音频地址`);
+      return finalUrl;
+    }
+
+    if (isFlac) {
+      logInfo(`已确认音频为 FLAC；音源未返回最终 URL，将由下载格式参数确保 .flac 落盘`);
+    } else if (/audio\/mpeg/i.test(contentType)) {
+      logWarn(`请求无损音质，但音源实际响应为 MP3，可能发生音质降级`);
+    }
+  } catch (e) {
+    logWarn(`无损格式探测失败，继续使用原始 URL: ${String(e)}`);
+  }
+
+  return url;
 }
 
 /**
@@ -253,7 +313,8 @@ async function downloadTrack(
   const result = await resolveTrackUrl(config, track);
   if (result && result.url) {
     logInfo(`音源URL解析成功: ${track.title} → ${result.url.substring(0, 100)}... (source=${result.source})`);
-    songId = await createRemoteSong(track, result.url);
+    const downloadUrl = await prepareUrlForDownload(result.url, result.quality);
+    songId = await createRemoteSong(track, downloadUrl);
   } else {
     logWarn(`音源URL解析失败: ${track.title}`);
   }
@@ -281,7 +342,7 @@ async function downloadTrack(
   let downloadSuccess = false;
   try {
     logInfo(`开始下载到本地: ${track.title} (songId=${songId})`);
-    const downloadResult = await songloft.songs.download(songId);
+    const downloadResult = await downloadSong(songId, config);
     logInfo(`下载结果: ${track.title} - ${JSON.stringify(downloadResult)}`);
     if (downloadResult.status === 'ok' || downloadResult.status === 'done') {
       logInfo(`已下载: ${track.title} → ${downloadResult.path || '(路径未知)'}`);
@@ -393,14 +454,18 @@ export async function importPlaylist(
 
     try {
       // 若复用已有歌单，先检查歌曲是否已在歌单中（增量导入）
-      if (existingPlaylistSongs.length > 0 && isSongInPlaylist(track, existingPlaylistSongs)) {
+      const requireLocal = config.importMode === 'download';
+      if (existingPlaylistSongs.length > 0 && isSongInPlaylist(track, existingPlaylistSongs, requireLocal)) {
         logInfo(`歌单已有此歌曲，跳过: ${track.title} - ${track.artist}`);
         progress.importedSongs++;
         continue;
       }
 
       // 再检查曲库中是否已有此歌曲
-      const existingId = await findExistingSong(track);
+      const shouldSearchLibrary = config.importMode !== 'download' || config.reuseLocalSongs;
+      const existingId = shouldSearchLibrary
+        ? await findExistingSong(track, config.importMode === 'download')
+        : null;
       if (existingId) {
         logInfo(`曲库已有此歌曲: ${track.title} (id=${existingId})`);
         collectedSongIds.push(existingId);
@@ -493,7 +558,10 @@ export async function importPlaylist(
 
       // 创建歌曲
       if (url) {
-        songId = await createRemoteSong(track, url);
+        const createUrl = config.importMode === 'download'
+          ? await prepareUrlForDownload(url, config.defaultQuality)
+          : url;
+        songId = await createRemoteSong(track, createUrl);
       } else if (sourceData) {
         songId = await createSongWithSourceData(track, sourceData);
       }
@@ -510,7 +578,7 @@ export async function importPlaylist(
         let downloadSuccess = false;
         try {
           logInfo(`开始下载: ${track.title} (songId=${songId})`);
-          const downloadResult = await songloft.songs.download(songId);
+          const downloadResult = await downloadSong(songId, config);
           logInfo(`下载结果: ${track.title} - ${JSON.stringify(downloadResult)}`);
           if (downloadResult.status === 'ok' || downloadResult.status === 'done') {
             logInfo(`已下载: ${track.title} → ${downloadResult.path || '(路径未知)'}`);
